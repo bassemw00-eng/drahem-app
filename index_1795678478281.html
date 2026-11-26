@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>صيدليات دراهم</title>
+<style>
+:root{--bg:#f3f7f5;--sf:#fff;--tx:#12302a;--mu:#5b7a72;--ac:#0f7a5c;--ac2:#e3f3ed;--bd:#d5e3de;--rd:#c0392b;--or:#b9770e}
+@media(prefers-color-scheme:dark){:root{--bg:#0e1a17;--sf:#16251f;--tx:#e6f1ed;--mu:#8fb0a6;--ac:#3cc79a;--ac2:#1d3a31;--bd:#27403a;--rd:#ff7b6b;--or:#f0b44c}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font-family:"Segoe UI",Tahoma,"Noto Naskh Arabic",sans-serif;font-size:16px;line-height:1.6;padding:env(safe-area-inset-top) 0 calc(80px + env(safe-area-inset-bottom))}
+header{display:flex;justify-content:space-between;align-items:center;padding:16px 16px 4px}
+h1{margin:0;font-size:20px}header small{color:var(--mu);display:block}
+main{padding:10px 14px;max-width:640px;margin:auto}
+.card{background:var(--sf);border:1px solid var(--bd);border-radius:14px;padding:14px;margin-bottom:12px}
+.card h2{margin:0 0 8px;font-size:17px}
+label{display:block;font-size:13px;color:var(--mu);margin:8px 0 3px}
+input,select{width:100%;padding:10px;border:1px solid var(--bd);border-radius:10px;background:var(--bg);color:var(--tx);font:inherit}
+.row{display:flex;gap:8px}.row>*{flex:1}
+button{font:inherit;border:0;border-radius:10px;padding:11px 14px;background:var(--ac);color:#fff;cursor:pointer;font-weight:600}
+button.sec{background:var(--ac2);color:var(--ac)}button.del{background:transparent;color:var(--rd);padding:4px 8px}
+button:disabled{opacity:.45}
+.big{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}.big button{padding:18px 8px;font-size:18px}.big .out{background:var(--or)}
+.it{padding:10px 0;border-bottom:1px solid var(--bd)}.it:last-child{border:0}.it small,.msg{color:var(--mu);font-size:14px}
+.late{color:var(--rd)}.ot{color:var(--or)}
+table{border-collapse:collapse;width:100%;white-space:nowrap;font-size:14px}th,td{padding:8px 10px;text-align:right;border-bottom:1px solid var(--bd)}th{color:var(--mu);font-weight:600}
+nav{position:fixed;bottom:0;left:0;right:0;background:var(--sf);border-top:1px solid var(--bd);display:flex;overflow-x:auto;padding:6px 4px calc(6px + env(safe-area-inset-bottom))}
+nav button{flex:1;min-width:70px;background:transparent;color:var(--mu);font-size:14px;font-weight:500}nav button.on{color:var(--ac);font-weight:700}
+#toast{position:fixed;top:calc(10px + env(safe-area-inset-top));left:12px;right:12px;background:var(--tx);color:var(--bg);padding:12px;border-radius:12px;display:none;z-index:9;text-align:center}
+</style>
+</head>
+<body>
+<div id="toast"></div>
+<header><div><h1>صيدليات دراهم</h1><small id="who"></small></div><button class="sec" id="lo" data-a="logout" style="display:none">خروج</button></header>
+<main id="v"></main>
+<nav id="nav"></nav>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script>
+const URL_="https://tzivcmkzkgpzkhpnudbp.supabase.co",KEY="sb_publishable_tRq9m7SyJQW3vVCfYVQ1Jw_RawfN87s";
+const sb=supabase.createClient(URL_,KEY);
+const ROLES={gm:"مدير عام",courier:"مندوب توصيل",supervisor:"مشرف مناديب",pharmacist:"صيدلي",assistant:"مساعد صيدلي",branch_manager:"مدير فرع",admin:"إداري",accountant:"محاسب",coder:"تكويد"};
+const TABS=[["att","الحضور","attendance"],["rep","التقارير","reports"],["emp","الموظفون","employees"],["br","الفروع","branches"],["sh","الورديات","shifts"]];
+let me=null,perms=[],tab="att",C={b:[],s:[]};
+const $=i=>document.getElementById(i);
+const esc=s=>String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const can=k=>!!me&&me.active&&(me.role=="gm"||perms.indexOf(k)>-1);
+const fm=m=>{m=Math.round(m||0);return m<60?m+" د":Math.floor(m/60)+" س "+(m%60?m%60+" د":"")};
+const hm=x=>x?new Date(x).toLocaleTimeString("ar-EG",{hour:"2-digit",minute:"2-digit",timeZone:"Africa/Cairo"}):"-";
+const opt=(a,sel,ph)=>(ph?'<option value="">'+ph+"</option>":"")+a.map(x=>'<option value="'+x.id+'"'+(x.id==sel?" selected":"")+">"+esc(x.name)+"</option>").join("");
+const roleOpt=sel=>Object.keys(ROLES).filter(k=>k!="gm"||(me&&me.role=="gm")).map(k=>'<option value="'+k+'"'+(k==sel?" selected":"")+">"+ROLES[k]+"</option>").join("");
+function toast(t){const x=$("toast");x.textContent=t;x.style.display="block";clearTimeout(toast.h);toast.h=setTimeout(()=>x.style.display="none",4000)}
+
+async function boot(){
+  const {data:{session}}=await sb.auth.getSession();
+  if(!session){me=null;return render()}
+  const {data:p,error:pe}=await sb.from("profiles").select("*").eq("id",session.user.id).maybeSingle();
+  if(!p){me=null;toast("تعذر تحميل حسابك: "+(pe?pe.message:"لا يوجد ملف شخصي لهذا الحساب"));await sb.auth.signOut();return render()}
+  me=p;
+  const r=await sb.from("role_permissions").select("permission").eq("role",p.role);
+  perms=(r.data||[]).map(x=>x.permission);
+  await loadRef();render()
+}
+async function loadRef(){
+  const [b,s]=await Promise.all([sb.from("branches").select("*").order("id"),sb.from("shifts").select("*").order("id")]);
+  C.b=b.data||[];C.s=s.data||[]
+}
+async function render(){
+  $("lo").style.display=me?"block":"none";
+  $("who").textContent=me?me.full_name+" - "+ROLES[me.role]:"";
+  if(!me){$("v").innerHTML=vLogin();$("nav").innerHTML="";return}
+  const tabs=TABS.filter(t=>t[0]=="att"||can(t[2]));
+  if(!tabs.some(t=>t[0]==tab))tab="att";
+  $("nav").innerHTML=tabs.map(t=>'<button data-t="'+t[0]+'" class="'+(t[0]==tab?"on":"")+'">'+t[1]+"</button>").join("");
+  $("v").innerHTML=await {att:vAtt,rep:vRep,emp:vEmp,br:vBr,sh:vSh}[tab]()
+}
+function vLogin(){return'<div class="card"><h2>تسجيل الدخول</h2><label>اسم المستخدم أو الإيميل</label><input id="lu" autocapitalize="off" autocomplete="username"><label>كلمة السر</label><input id="lp" type="password" autocomplete="current-password"><button data-a="login" style="width:100%;margin-top:12px">دخول</button></div>'}
+
+async function vAtt(){
+  if(!me.active)return'<div class="card"><h2>حسابك لم يتم تفعيله</h2><p class="msg">اطلب من المدير العام تفعيل حسابك وتحديد فرعك ووردتك.</p></div>';
+  const b=C.b.find(x=>x.id==me.branch_id),s=C.s.find(x=>x.id==me.shift_id);
+  const {data}=await sb.from("attendance").select("*").eq("user_id",me.id).order("check_in",{ascending:false}).limit(10);
+  const rows=data||[],last=rows[0],open=last&&!last.check_out;
+  const today=new Date().toLocaleDateString("sv-SE",{timeZone:"Africa/Cairo"});
+  const st=open?"حاضر منذ "+hm(last.check_in):(last&&last.work_date==today?"تم الانصراف "+hm(last.check_out):"لم تسجل حضور اليوم");
+  let h='<div class="card"><h2>تسجيل الآن</h2><p class="msg">'+(b?esc(b.name):"بدون فرع")+" | "+(s?esc(s.name)+" "+s.start_time.slice(0,5)+" - "+s.end_time.slice(0,5):"بدون وردية")+"<br><b>"+st+'</b></p><div class="big"><button data-a="in"'+(last&&last.work_date==today?" disabled":"")+'>تسجيل حضور</button><button class="out" data-a="out"'+(open?"":" disabled")+'>تسجيل انصراف</button></div><p class="msg" id="loc"></p></div>';
+  h+='<div class="card"><h2>آخر تسجيلاتي</h2>'+(rows.length?rows.map(r=>'<div class="it">'+r.work_date+"<small> | حضور "+hm(r.check_in)+" | انصراف "+hm(r.check_out)+"</small>"+(r.late_min?' <span class="late">تأخير '+fm(r.late_min)+"</span>":"")+(r.overtime_min?' <span class="ot">أوفر تايم '+fm(r.overtime_min)+"</span>":"")+"</div>").join(""):'<p class="msg">لا توجد تسجيلات بعد.</p>')+"</div>";
+  return h
+}
+function punch(t){
+  if(!navigator.geolocation)return toast("الجهاز لا يدعم تحديد الموقع");
+  $("loc").textContent="جاري تحديد موقعك...";
+  navigator.geolocation.getCurrentPosition(async p=>{
+    const {data,error}=await sb.rpc(t=="in"?"punch_in":"punch_out",{p_lat:p.coords.latitude,p_lng:p.coords.longitude});
+    if(error)toast(error.message);
+    else toast(t=="in"?"تم تسجيل الحضور"+(data.late_min?" (تأخير "+fm(data.late_min)+")":""):"تم تسجيل الانصراف"+(data.overtime_min?" (أوفر تايم "+fm(data.overtime_min)+")":""));
+    render()
+  },()=>{$("loc").textContent="";toast("تعذر تحديد موقعك. فعّل الموقع وأعطِ التطبيق الإذن")},{enableHighAccuracy:true,timeout:15000,maximumAge:0})
+}
+
+async function vEmp(){
+  const {data}=await sb.from("profiles").select("*").order("full_name");
+  const sel=(id,f,html)=>'<select data-id="'+id+'" data-f="'+f+'">'+html+"</select>";
+  let h='<div class="card"><h2>إضافة موظف</h2><label>الاسم</label><input id="ef"><label>اسم المستخدم (إنجليزي بدون مسافات)</label><input id="en" autocapitalize="off"><label>كلمة السر (6 أحرف على الأقل)</label><input id="ep" type="text" autocomplete="off"><label>الدور</label><select id="er">'+roleOpt("assistant")+'</select><div class="row"><div><label>الفرع</label><select id="eb">'+opt(C.b,"","بدون")+'</select></div><div><label>الوردية</label><select id="es">'+opt(C.s,"","بدون")+'</select></div></div><button data-a="addemp" style="width:100%;margin-top:12px">إضافة وتفعيل</button></div>';
+  h+='<div class="card"><h2>الموظفون ('+(data||[]).length+")</h2>"+(data||[]).map(p=>'<div class="it"><b>'+esc(p.full_name)+"</b>"+sel(p.id,"role",roleOpt(p.role))+'<div class="row">'+sel(p.id,"branch_id",opt(C.b,p.branch_id,"بدون فرع"))+sel(p.id,"shift_id",opt(C.s,p.shift_id,"بدون وردية"))+"</div>"+sel(p.id,"active",'<option value="true"'+(p.active?" selected":"")+'>مفعل</option><option value="false"'+(p.active?"":" selected")+">معطل</option>")+"</div>").join("")+"</div>";
+  return h
+}
+async function vBr(){
+  return'<div class="card"><h2>إضافة فرع</h2><label>اسم الفرع</label><input id="bn"><div class="row"><div><label>خط العرض</label><input id="bla" inputmode="decimal"></div><div><label>خط الطول</label><input id="blo" inputmode="decimal"></div></div><label>نطاق الحضور بالمتر</label><input id="br" inputmode="numeric" value="150"><div class="row" style="margin-top:10px"><button class="sec" data-a="here">موقعي الحالي</button><button data-a="addbr">حفظ</button></div><p class="msg">قف داخل الفرع واضغط "موقعي الحالي" لتحديد الإحداثيات بدقة.</p></div>'+lst(C.b,"branches",b=>esc(b.name)+"<small> | "+b.lat+" , "+b.lng+" | النطاق "+b.radius_m+" متر</small>")
+}
+async function vSh(){
+  return'<div class="card"><h2>إضافة وردية</h2><label>اسم الوردية</label><input id="sn"><div class="row"><div><label>البداية</label><input type="time" id="ss" value="09:00"></div><div><label>النهاية</label><input type="time" id="se" value="17:00"></div></div><label>سماح التأخير بالدقائق</label><input id="sg" inputmode="numeric" value="10"><button data-a="addsh" style="width:100%;margin-top:12px">حفظ</button></div>'+lst(C.s,"shifts",s=>esc(s.name)+"<small> | "+s.start_time.slice(0,5)+" - "+s.end_time.slice(0,5)+" | سماح "+s.grace_min+" د</small>")
+}
+function lst(a,t,f){return'<div class="card"><h2>القائمة ('+a.length+")</h2>"+(a.length?a.map(x=>'<div class="it" style="display:flex;justify-content:space-between;align-items:center"><div>'+f(x)+'</div><button class="del" data-del="'+t+":"+x.id+'">حذف</button></div>').join(""):'<p class="msg">لا يوجد شيء بعد.</p>')+"</div>"}
+const val=i=>$(i).value.trim();
+let R={from:"",to:"",b:"",rows:null};
+async function vRep(){
+  if(!R.from){const t=new Date().toLocaleDateString("sv-SE",{timeZone:"Africa/Cairo"});R.from=t.slice(0,8)+"01";R.to=t}
+  const rows=R.rows;
+  let h='<div class="card"><h2>تقارير الحضور</h2><div class="row"><div><label>من</label><input type="date" id="rf" value="'+R.from+'"></div><div><label>إلى</label><input type="date" id="rt" value="'+R.to+'"></div></div><label>الفرع</label><select id="rb">'+opt(C.b,R.b,"كل الفروع")+'</select><div class="row" style="margin-top:10px"><button data-a="rep">عرض التقرير</button><button class="sec" data-a="xls"'+(rows&&rows.length?"":" disabled")+'>تصدير Excel</button></div></div>';
+  if(rows){
+    const m={};rows.forEach(r=>{const x=m[r.n]=m[r.n]||{d:0,w:0,l:0,c:0,o:0};x.d++;x.w+=r.w;x.l+=r.l;if(r.l)x.c++;x.o+=r.ot});
+    const ks=Object.keys(m);
+    h+='<div class="card"><h2>ملخص لكل موظف</h2><div style="overflow-x:auto"><table><tr><th>الموظف</th><th>أيام</th><th>ساعات الحضور</th><th>التأخير</th><th>الساعات الإضافية</th></tr>'+(ks.length?ks.map(k=>{const x=m[k];return"<tr><td>"+esc(k)+"</td><td>"+x.d+"</td><td>"+fm(x.w)+'</td><td class="late">'+fm(x.l)+" ("+x.c+')</td><td class="ot">'+fm(x.o)+"</td></tr>"}).join(""):'<tr><td colspan="5">لا توجد بيانات في هذه الفترة.</td></tr>')+"</table></div></div>";
+    h+='<div class="card"><h2>التفاصيل اليومية ('+rows.length+')</h2><div style="overflow-x:auto"><table><tr><th>التاريخ</th><th>الموظف</th><th>الفرع</th><th>حضور</th><th>انصراف</th><th>ساعات الحضور</th><th>تأخير</th><th>ساعات إضافية</th></tr>'+rows.map(r=>"<tr><td>"+r.d+"</td><td>"+esc(r.n)+"</td><td>"+esc(r.b)+"</td><td>"+hm(r.i)+"</td><td>"+(r.o?hm(r.o):"لم ينصرف")+"</td><td>"+fm(r.w)+'</td><td class="late">'+(r.l?fm(r.l):"-")+'</td><td class="ot">'+(r.ot?fm(r.ot):"-")+"</td></tr>").join("")+"</table></div></div>"
+  }
+  return h
+}
+async function runRep(){
+  R.from=val("rf");R.to=val("rt");R.b=val("rb");
+  if(!R.from||!R.to)return toast("اختر تاريخ البداية والنهاية");
+  let q=sb.from("attendance").select("*,profiles!inner(full_name,branch_id)").gte("work_date",R.from).lte("work_date",R.to).order("work_date").order("check_in").limit(5000);
+  if(R.b)q=q.eq("profiles.branch_id",R.b);
+  const {data,error}=await q;
+  if(error)return toast(error.message);
+  R.rows=(data||[]).map(r=>({d:r.work_date,n:r.profiles.full_name,b:(C.b.find(x=>x.id==r.profiles.branch_id)||{}).name||"-",i:r.check_in,o:r.check_out,w:r.work_min,l:r.late_min,ot:r.overtime_min}));
+  render()
+}
+function exportXls(){
+  const rows=R.rows||[],hh=m=>Math.round(m/60*100)/100;
+  const tm=x=>x?new Date(x).toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit",timeZone:"Africa/Cairo"}):"";
+  const det=rows.map(r=>({"التاريخ":r.d,"الموظف":r.n,"الفرع":r.b,"وقت الحضور":tm(r.i),"وقت الانصراف":r.o?tm(r.o):"لم ينصرف","ساعات الحضور":hh(r.w),"دقائق التأخير":r.l,"الساعات الإضافية":hh(r.ot)}));
+  const m={};
+  rows.forEach(r=>{const x=m[r.n]=m[r.n]||{"الموظف":r.n,"أيام الحضور":0,"ساعات الحضور":0,"دقائق التأخير":0,"الساعات الإضافية":0};x["أيام الحضور"]++;x["ساعات الحضور"]+=r.w/60;x["دقائق التأخير"]+=r.l;x["الساعات الإضافية"]+=r.ot/60});
+  const sum=Object.keys(m).map(k=>{const x=m[k];x["ساعات الحضور"]=Math.round(x["ساعات الحضور"]*100)/100;x["الساعات الإضافية"]=Math.round(x["الساعات الإضافية"]*100)/100;return x});
+  const wb=XLSX.utils.book_new();
+  wb.Workbook={Views:[{RTL:true}]};
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(sum),"الملخص");
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(det),"التفاصيل");
+  XLSX.writeFile(wb,"attendance-"+R.from+"_"+R.to+".xlsx")
+}
+
+document.addEventListener("click",async ev=>{
+  const t=ev.target.closest("[data-t],[data-a],[data-del]");if(!t)return;
+  if(t.dataset.t){tab=t.dataset.t;return render()}
+  if(t.dataset.del){const [tb,id]=t.dataset.del.split(":");const {error}=await sb.from(tb).delete().eq("id",id);if(error)return toast(error.message.indexOf("foreign")>-1?"لا يمكن الحذف لأنه مستخدم عند موظفين":error.message);await loadRef();return render()}
+  const a=t.dataset.a;
+  if(a=="login"){let u=val("lu");if(u.indexOf("@")<0)u=u.toLowerCase()+"@drahem.app";const {error}=await sb.auth.signInWithPassword({email:u,password:$("lp").value});if(error)toast("خطأ في الدخول: "+error.message);else boot().catch(x=>toast("خطأ: "+x.message))}
+  else if(a=="logout"){await sb.auth.signOut();me=null;render()}
+  else if(a=="in"||a=="out")punch(a);
+  else if(a=="rep")runRep();
+  else if(a=="xls")exportXls();
+  else if(a=="here"){navigator.geolocation.getCurrentPosition(p=>{$("bla").value=p.coords.latitude.toFixed(6);$("blo").value=p.coords.longitude.toFixed(6);toast("تم تحديد الموقع، الدقة تقريباً "+Math.round(p.coords.accuracy)+" متر")},()=>toast("تعذر تحديد موقعك"),{enableHighAccuracy:true,timeout:15000})}
+  else if(a=="addbr"){const la=parseFloat(val("bla")),lo=parseFloat(val("blo")),r=parseInt(val("br"));if(!val("bn")||isNaN(la)||isNaN(lo)||!r)return toast("اكتب الاسم والإحداثيات والنطاق");const {error}=await sb.from("branches").insert({name:val("bn"),lat:la,lng:lo,radius_m:r});if(error)return toast(error.message);await loadRef();render()}
+  else if(a=="addsh"){if(!val("sn"))return toast("اكتب اسم الوردية");const {error}=await sb.from("shifts").insert({name:val("sn"),start_time:val("ss"),end_time:val("se"),grace_min:parseInt(val("sg"))||0});if(error)return toast(error.message);await loadRef();render()}
+  else if(a=="addemp"){
+    const un=val("en").toLowerCase(),nm=val("ef"),pw=$("ep").value;
+    if(!nm||!un||pw.length<6)return toast("اكتب الاسم واسم المستخدم وكلمة سر 6 أحرف على الأقل");
+    const tmp=supabase.createClient(URL_,KEY,{auth:{persistSession:false,autoRefreshToken:false,storageKey:"tmp-signup"}});
+    const {data,error}=await tmp.auth.signUp({email:un.indexOf("@")>-1?un:un+"@drahem.app",password:pw,options:{data:{full_name:nm}}});
+    if(error||!data.user)return toast(error?error.message:"تعذر إنشاء الحساب");
+    const e2=await sb.from("profiles").update({role:$("er").value,branch_id:+$("eb").value||null,shift_id:+$("es").value||null,active:true}).eq("id",data.user.id);
+    if(e2.error)return toast(e2.error.message);
+    toast("تمت إضافة الموظف");render()
+  }
+});
+document.addEventListener("change",async ev=>{
+  const e=ev.target;if(!e.dataset.f)return;
+  if(e.dataset.id==me.id&&(e.dataset.f=="role"||e.dataset.f=="active")){toast("لا يمكنك تغيير دورك أو تعطيل حسابك");return render()}
+  let v=e.value;if(e.dataset.f=="active")v=v=="true";else if(e.dataset.f!="role")v=+v||null;
+  const {error}=await sb.from("profiles").update({[e.dataset.f]:v}).eq("id",e.dataset.id);
+  if(error)toast(error.message);else toast("تم الحفظ");
+  if(e.dataset.id==me.id)boot()
+});
+boot().catch(x=>toast("خطأ: "+x.message));
+</script>
+</body>
+</html>
