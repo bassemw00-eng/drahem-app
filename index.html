@@ -23,6 +23,8 @@ button:disabled{opacity:.45}
 .big{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}.big button{padding:18px 8px;font-size:18px}.big .out{background:var(--or)}
 .it{padding:10px 0;border-bottom:1px solid var(--bd)}.it:last-child{border:0}.it small,.msg{color:var(--mu);font-size:14px}
 .late{color:var(--rd)}.ot{color:var(--or)}
+table{border-collapse:collapse;width:100%;white-space:nowrap;font-size:14px}th,td{padding:8px 10px;text-align:right;border-bottom:1px solid var(--bd)}th{color:var(--mu);font-weight:600}
+.tag{font-size:12px;background:var(--ac2);color:var(--ac);padding:2px 8px;border-radius:8px;font-weight:600}
 nav{position:fixed;bottom:0;left:0;right:0;background:var(--sf);border-top:1px solid var(--bd);display:flex;overflow-x:auto;padding:6px 4px calc(6px + env(safe-area-inset-bottom))}
 nav button{flex:1;min-width:70px;background:transparent;color:var(--mu);font-size:14px;font-weight:500}nav button.on{color:var(--ac);font-weight:700}
 #toast{position:fixed;top:calc(10px + env(safe-area-inset-top));left:12px;right:12px;background:var(--tx);color:var(--bg);padding:12px;border-radius:12px;display:none;z-index:9;text-align:center}
@@ -34,12 +36,13 @@ nav button{flex:1;min-width:70px;background:transparent;color:var(--mu);font-siz
 <main id="v"></main>
 <nav id="nav"></nav>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script>
 const URL_="https://tzivcmkzkgpzkhpnudbp.supabase.co",KEY="sb_publishable_tRq9m7SyJQW3vVCfYVQ1Jw_RawfN87s";
 const sb=supabase.createClient(URL_,KEY);
 const ROLES={gm:"مدير عام",courier:"مندوب توصيل",supervisor:"مشرف مناديب",pharmacist:"صيدلي",assistant:"مساعد صيدلي",branch_manager:"مدير فرع",admin:"إداري",accountant:"محاسب",coder:"تكويد"};
-const TABS=[["att","الحضور","attendance"],["emp","الموظفون","employees"],["br","الفروع","branches"],["sh","الورديات","shifts"]];
-let me=null,perms=[],tab="att",C={b:[],s:[]};
+const TABS=[["att","الحضور","attendance"],["rep","التقارير","reports"],["ord","الطلبات","orders"],["nt","الإشعارات",null],["emp","الموظفون","employees"],["br","الفروع","branches"],["sh","الورديات","shifts"]];
+let me=null,perms=[],tab="att",C={b:[],s:[]},unread=0,ch=null,AC=null;
 const $=i=>document.getElementById(i);
 const esc=s=>String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const can=k=>!!me&&me.active&&(me.role=="gm"||perms.indexOf(k)>-1);
@@ -52,11 +55,11 @@ function toast(t){const x=$("toast");x.textContent=t;x.style.display="block";cle
 async function boot(){
   const {data:{session}}=await sb.auth.getSession();
   if(!session){me=null;return render()}
-  const {data:p}=await sb.from("profiles").select("*").eq("id",session.user.id).single();
-  if(!p){me=null;await sb.auth.signOut();return render()}
+  const {data:p,error:pe}=await sb.from("profiles").select("*").eq("id",session.user.id).maybeSingle();
+  if(!p){me=null;toast("تعذر تحميل حسابك: "+(pe?pe.message:"لا يوجد ملف شخصي لهذا الحساب"));await sb.auth.signOut();return render()}
   me=p;
   const r=await sb.from("role_permissions").select("permission").eq("role",p.role);
-  perms=(r.data||[]).map(x=>x.permission);
+  perms=(r.data||[]).map(x=>x.permission);await refreshUnread();listen();
   await loadRef();render()
 }
 async function loadRef(){
@@ -67,10 +70,10 @@ async function render(){
   $("lo").style.display=me?"block":"none";
   $("who").textContent=me?me.full_name+" - "+ROLES[me.role]:"";
   if(!me){$("v").innerHTML=vLogin();$("nav").innerHTML="";return}
-  const tabs=TABS.filter(t=>t[0]=="att"||can(t[2]));
+  const tabs=TABS.filter(t=>t[0]=="att"||t[0]=="nt"||can(t[2])||(t[0]=="ord"&&me.role=="courier"));
   if(!tabs.some(t=>t[0]==tab))tab="att";
-  $("nav").innerHTML=tabs.map(t=>'<button data-t="'+t[0]+'" class="'+(t[0]==tab?"on":"")+'">'+t[1]+"</button>").join("");
-  $("v").innerHTML=await {att:vAtt,emp:vEmp,br:vBr,sh:vSh}[tab]()
+  $("nav").innerHTML=tabs.map(t=>'<button data-t="'+t[0]+'" class="'+(t[0]==tab?"on":"")+'">'+t[1]+(t[0]=="nt"&&unread?" ("+unread+")":"")+"</button>").join("");
+  $("v").innerHTML=await {att:vAtt,ord:vOrd,nt:vNt,rep:vRep,emp:vEmp,br:vBr,sh:vSh}[tab]()
 }
 function vLogin(){return'<div class="card"><h2>تسجيل الدخول</h2><label>اسم المستخدم أو الإيميل</label><input id="lu" autocapitalize="off" autocomplete="username"><label>كلمة السر</label><input id="lp" type="password" autocomplete="current-password"><button data-a="login" style="width:100%;margin-top:12px">دخول</button></div>'}
 
@@ -111,15 +114,92 @@ async function vSh(){
 }
 function lst(a,t,f){return'<div class="card"><h2>القائمة ('+a.length+")</h2>"+(a.length?a.map(x=>'<div class="it" style="display:flex;justify-content:space-between;align-items:center"><div>'+f(x)+'</div><button class="del" data-del="'+t+":"+x.id+'">حذف</button></div>').join(""):'<p class="msg">لا يوجد شيء بعد.</p>')+"</div>"}
 const val=i=>$(i).value.trim();
+const ST={new:"جديد",assigned:"مسند",accepted:"مقبول",picked_up:"مستلم",on_the_way:"في الطريق",delivered:"تم التوصيل",refused:"رفض الاستلام",postponed:"مؤجل"};
+document.addEventListener("click",()=>{try{if(!AC)AC=new(window.AudioContext||window.webkitAudioContext)();AC.resume()}catch(e){}});
+function beep(){try{if(!AC)AC=new(window.AudioContext||window.webkitAudioContext)();AC.resume();[0,.25,.5].forEach((d,i)=>{const o=AC.createOscillator(),g=AC.createGain();o.frequency.value=i==1?1050:880;o.connect(g);g.connect(AC.destination);const t=AC.currentTime+d;g.gain.setValueAtTime(.3,t);g.gain.exponentialRampToValueAtTime(.001,t+.22);o.start(t);o.stop(t+.23)});if(navigator.vibrate)navigator.vibrate([200,100,200])}catch(e){}}
+async function refreshUnread(){const {count}=await sb.from("notifications").select("id",{count:"exact",head:true}).eq("user_id",me.id).eq("read",false);unread=count||0}
+function listen(){if(ch)return;ch=sb.channel("nt-"+me.id).on("postgres_changes",{event:"INSERT",schema:"public",table:"notifications",filter:"user_id=eq."+me.id},p=>{beep();toast(p.new.title+(p.new.body?": "+p.new.body:""));unread++;render()}).subscribe()}
+async function vNt(){
+  const {data}=await sb.from("notifications").select("*").eq("user_id",me.id).order("id",{ascending:false}).limit(50);
+  const rows=data||[];
+  if(unread){await sb.from("notifications").update({read:true}).eq("user_id",me.id).eq("read",false);unread=0;const b=$("nav").querySelector('[data-t="nt"]');if(b)b.textContent="الإشعارات"}
+  return'<div class="card"><h2>الإشعارات</h2><button class="sec" data-a="beep">اختبار الصوت</button><p class="msg">الصوت يشتغل والتطبيق مفتوح، بعد أول لمسة للشاشة.</p></div><div class="card">'+(rows.length?rows.map(r=>'<div class="it"'+(r.read?"":' style="border-right:3px solid var(--ac);padding-right:8px"')+"><b>"+esc(r.title)+"</b><small> | "+hm(r.created_at)+"</small><br>"+esc(r.body)+"</div>").join(""):'<p class="msg">لا توجد إشعارات.</p>')+"</div>"
+}
+async function vOrd(){return can("orders")?vOrdMgr():vOrdCour()}
+async function vOrdMgr(){
+  const [o,cr]=await Promise.all([sb.from("orders").select("*,cr:profiles!orders_courier_id_fkey(full_name)").order("id",{ascending:false}).limit(60),sb.rpc("available_couriers")]);
+  const cs=cr.data||[],rows=o.data||[];
+  const copts=cs.map(c=>'<option value="'+c.cid+'">'+esc(c.cname)+" ("+c.cnt+")</option>").join("");
+  let h='<div class="card"><h2>طلب جديد</h2><label>اسم العميل</label><input id="oc"><label>رقم الموبايل</label><input id="op" inputmode="tel"><label>العنوان</label><input id="oa"><label>ملاحظات</label><input id="on"><div class="row"><div><label>المبلغ</label><input id="om" inputmode="decimal"></div><div><label>الفرع</label><select id="ob">'+opt(C.b,me.branch_id,"بدون")+'</select></div></div><button data-a="addord" style="width:100%;margin-top:12px">إضافة الطلب</button></div>';
+  h+='<div class="card"><h2>المناديب الحاضرون الآن ('+cs.length+")</h2>"+(cs.length?cs.map(c=>'<div class="it">'+esc(c.cname)+"<small> | طلبات مفتوحة: "+c.cnt+"</small></div>").join(""):'<p class="msg">لا يوجد مندوب مسجل حضور حالياً.</p>')+"</div>";
+  h+='<div class="card"><h2>الطلبات ('+rows.length+")</h2>"+(rows.length?rows.map(r=>'<div class="it"><b>#'+r.id+" "+esc(r.customer_name)+'</b> <span class="tag">'+ST[r.status]+"</span><small><br>"+esc(r.phone)+" | "+esc(r.address)+(r.cr?"<br>المندوب: "+esc(r.cr.full_name):"")+(r.result_note?"<br>ملاحظة: "+esc(r.result_note):"")+(r.postponed_until?"<br>مؤجل إلى: "+new Date(r.postponed_until).toLocaleString("ar-EG",{timeZone:"Africa/Cairo"}):"")+"</small>"+(["new","assigned","postponed"].indexOf(r.status)>-1&&cs.length?'<div class="row" style="margin-top:8px"><select id="c'+r.id+'">'+copts+'</select><button data-a="assign" data-id="'+r.id+'">'+(r.courier_id?"إعادة إسناد":"إسناد")+"</button></div>":"")+"</div>").join(""):'<p class="msg">لا توجد طلبات بعد.</p>')+"</div>";
+  return h
+}
+async function vOrdCour(){
+  const {data}=await sb.from("orders").select("*").eq("courier_id",me.id).order("id",{ascending:false}).limit(40);
+  const rows=data||[],OPEN=["assigned","accepted","picked_up","on_the_way"],act=rows.filter(r=>OPEN.indexOf(r.status)>-1),done=rows.filter(r=>OPEN.indexOf(r.status)<0).slice(0,10);
+  const btn=(r,s,l,c)=>'<button'+(c?' class="'+c+'"':"")+' data-a="step" data-id="'+r.id+'" data-s="'+s+'" style="width:100%;margin-top:8px">'+l+"</button>";
+  const card=r=>{
+    let a="";
+    if(r.status=="assigned")a=btn(r,"accepted","قبول المهمة");
+    else if(r.status=="accepted")a=btn(r,"picked_up","تم استلام الطلب");
+    else if(r.status=="picked_up")a=btn(r,"on_the_way","في الطريق للعميل");
+    else a='<label>ملاحظة (إلزامية عند الرفض أو التأجيل)</label><input id="n'+r.id+'"><label>موعد التأجيل (اختياري)</label><input type="datetime-local" id="d'+r.id+'"><div class="big"><button data-a="step" data-id="'+r.id+'" data-s="delivered">تم التوصيل</button><button class="out" data-a="step" data-id="'+r.id+'" data-s="postponed">تأجيل</button></div>'+btn(r,"refused","العميل رفض الاستلام","sec");
+    return'<div class="card"><h2>#'+r.id+" "+esc(r.customer_name)+' <span class="tag">'+ST[r.status]+'</span></h2><p class="msg">الموبايل: <a href="tel:'+esc(r.phone)+'" style="color:var(--ac)">'+esc(r.phone)+"</a><br>"+esc(r.address)+' <a style="color:var(--ac)" target="_blank" rel="noopener" href="https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(r.address)+'">فتح الخريطة</a>'+(r.notes?"<br>"+esc(r.notes):"")+(r.amount?"<br>المبلغ: "+r.amount:"")+"</p>"+a+"</div>"
+  };
+  return(act.length?act.map(card).join(""):'<div class="card"><p class="msg">لا توجد مهام حالياً. سيصلك إشعار صوتي عند إسناد طلب.</p></div>')+(done.length?'<div class="card"><h2>آخر الطلبات المنتهية</h2>'+done.map(r=>'<div class="it">#'+r.id+" "+esc(r.customer_name)+' <span class="tag">'+ST[r.status]+"</span>"+(r.result_note?"<small><br>"+esc(r.result_note)+"</small>":"")+"</div>").join("")+"</div>":"")
+}
+let R={from:"",to:"",b:"",rows:null};
+async function vRep(){
+  if(!R.from){const t=new Date().toLocaleDateString("sv-SE",{timeZone:"Africa/Cairo"});R.from=t.slice(0,8)+"01";R.to=t}
+  const rows=R.rows;
+  let h='<div class="card"><h2>تقارير الحضور</h2><div class="row"><div><label>من</label><input type="date" id="rf" value="'+R.from+'"></div><div><label>إلى</label><input type="date" id="rt" value="'+R.to+'"></div></div><label>الفرع</label><select id="rb">'+opt(C.b,R.b,"كل الفروع")+'</select><div class="row" style="margin-top:10px"><button data-a="rep">عرض التقرير</button><button class="sec" data-a="xls"'+(rows&&rows.length?"":" disabled")+'>تصدير Excel</button></div></div>';
+  if(rows){
+    const m={};rows.forEach(r=>{const x=m[r.n]=m[r.n]||{d:0,w:0,l:0,c:0,o:0};x.d++;x.w+=r.w;x.l+=r.l;if(r.l)x.c++;x.o+=r.ot});
+    const ks=Object.keys(m);
+    h+='<div class="card"><h2>ملخص لكل موظف</h2><div style="overflow-x:auto"><table><tr><th>الموظف</th><th>أيام</th><th>ساعات الحضور</th><th>التأخير</th><th>الساعات الإضافية</th></tr>'+(ks.length?ks.map(k=>{const x=m[k];return"<tr><td>"+esc(k)+"</td><td>"+x.d+"</td><td>"+fm(x.w)+'</td><td class="late">'+fm(x.l)+" ("+x.c+')</td><td class="ot">'+fm(x.o)+"</td></tr>"}).join(""):'<tr><td colspan="5">لا توجد بيانات في هذه الفترة.</td></tr>')+"</table></div></div>";
+    h+='<div class="card"><h2>التفاصيل اليومية ('+rows.length+')</h2><div style="overflow-x:auto"><table><tr><th>التاريخ</th><th>الموظف</th><th>الفرع</th><th>حضور</th><th>انصراف</th><th>ساعات الحضور</th><th>تأخير</th><th>ساعات إضافية</th></tr>'+rows.map(r=>"<tr><td>"+r.d+"</td><td>"+esc(r.n)+"</td><td>"+esc(r.b)+"</td><td>"+hm(r.i)+"</td><td>"+(r.o?hm(r.o):"لم ينصرف")+"</td><td>"+fm(r.w)+'</td><td class="late">'+(r.l?fm(r.l):"-")+'</td><td class="ot">'+(r.ot?fm(r.ot):"-")+"</td></tr>").join("")+"</table></div></div>"
+  }
+  return h
+}
+async function runRep(){
+  R.from=val("rf");R.to=val("rt");R.b=val("rb");
+  if(!R.from||!R.to)return toast("اختر تاريخ البداية والنهاية");
+  let q=sb.from("attendance").select("*,profiles!inner(full_name,branch_id)").gte("work_date",R.from).lte("work_date",R.to).order("work_date").order("check_in").limit(5000);
+  if(R.b)q=q.eq("profiles.branch_id",R.b);
+  const {data,error}=await q;
+  if(error)return toast(error.message);
+  R.rows=(data||[]).map(r=>({d:r.work_date,n:r.profiles.full_name,b:(C.b.find(x=>x.id==r.profiles.branch_id)||{}).name||"-",i:r.check_in,o:r.check_out,w:r.work_min,l:r.late_min,ot:r.overtime_min}));
+  render()
+}
+function exportXls(){
+  const rows=R.rows||[],hh=m=>Math.round(m/60*100)/100;
+  const tm=x=>x?new Date(x).toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit",timeZone:"Africa/Cairo"}):"";
+  const det=rows.map(r=>({"التاريخ":r.d,"الموظف":r.n,"الفرع":r.b,"وقت الحضور":tm(r.i),"وقت الانصراف":r.o?tm(r.o):"لم ينصرف","ساعات الحضور":hh(r.w),"دقائق التأخير":r.l,"الساعات الإضافية":hh(r.ot)}));
+  const m={};
+  rows.forEach(r=>{const x=m[r.n]=m[r.n]||{"الموظف":r.n,"أيام الحضور":0,"ساعات الحضور":0,"دقائق التأخير":0,"الساعات الإضافية":0};x["أيام الحضور"]++;x["ساعات الحضور"]+=r.w/60;x["دقائق التأخير"]+=r.l;x["الساعات الإضافية"]+=r.ot/60});
+  const sum=Object.keys(m).map(k=>{const x=m[k];x["ساعات الحضور"]=Math.round(x["ساعات الحضور"]*100)/100;x["الساعات الإضافية"]=Math.round(x["الساعات الإضافية"]*100)/100;return x});
+  const wb=XLSX.utils.book_new();
+  wb.Workbook={Views:[{RTL:true}]};
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(sum),"الملخص");
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(det),"التفاصيل");
+  XLSX.writeFile(wb,"attendance-"+R.from+"_"+R.to+".xlsx")
+}
 
 document.addEventListener("click",async ev=>{
   const t=ev.target.closest("[data-t],[data-a],[data-del]");if(!t)return;
   if(t.dataset.t){tab=t.dataset.t;return render()}
   if(t.dataset.del){const [tb,id]=t.dataset.del.split(":");const {error}=await sb.from(tb).delete().eq("id",id);if(error)return toast(error.message.indexOf("foreign")>-1?"لا يمكن الحذف لأنه مستخدم عند موظفين":error.message);await loadRef();return render()}
   const a=t.dataset.a;
-  if(a=="login"){let u=val("lu");if(u.indexOf("@")<0)u=u.toLowerCase()+"@drahem.app";const {error}=await sb.auth.signInWithPassword({email:u,password:$("lp").value});if(error)toast("بيانات الدخول غير صحيحة");else boot()}
-  else if(a=="logout"){await sb.auth.signOut();me=null;render()}
+  if(a=="login"){let u=val("lu");if(u.indexOf("@")<0)u=u.toLowerCase()+"@drahem.app";const {error}=await sb.auth.signInWithPassword({email:u,password:$("lp").value});if(error)toast("خطأ في الدخول: "+error.message);else boot().catch(x=>toast("خطأ: "+x.message))}
+  else if(a=="logout"){if(ch){sb.removeChannel(ch);ch=null}unread=0;await sb.auth.signOut();me=null;render()}
   else if(a=="in"||a=="out")punch(a);
+  else if(a=="rep")runRep();
+  else if(a=="xls")exportXls();
+  else if(a=="beep")beep();
+  else if(a=="addord"){if(!val("oc")||!val("op")||!val("oa"))return toast("اكتب اسم العميل والموبايل والعنوان");const {error}=await sb.from("orders").insert({customer_name:val("oc"),phone:val("op"),address:val("oa"),notes:val("on")||null,amount:parseFloat(val("om"))||null,branch_id:+val("ob")||null});if(error)return toast(error.message);toast("تمت إضافة الطلب");render()}
+  else if(a=="assign"){const id=t.dataset.id,c=$("c"+id).value;if(!c)return toast("لا يوجد مندوب حاضر للإسناد");const {error}=await sb.rpc("assign_order",{p_order:+id,p_courier:c});toast(error?error.message:"تم الإسناد وإرسال إشعار للمندوب");render()}
+  else if(a=="step"){const id=t.dataset.id,st=t.dataset.s,n=$("n"+id),d=$("d"+id);const {error}=await sb.rpc("courier_step",{p_order:+id,p_status:st,p_note:n&&n.value.trim()?n.value.trim():null,p_until:d&&d.value?new Date(d.value).toISOString():null});toast(error?error.message:"تم التحديث");render()}
   else if(a=="here"){navigator.geolocation.getCurrentPosition(p=>{$("bla").value=p.coords.latitude.toFixed(6);$("blo").value=p.coords.longitude.toFixed(6);toast("تم تحديد الموقع، الدقة تقريباً "+Math.round(p.coords.accuracy)+" متر")},()=>toast("تعذر تحديد موقعك"),{enableHighAccuracy:true,timeout:15000})}
   else if(a=="addbr"){const la=parseFloat(val("bla")),lo=parseFloat(val("blo")),r=parseInt(val("br"));if(!val("bn")||isNaN(la)||isNaN(lo)||!r)return toast("اكتب الاسم والإحداثيات والنطاق");const {error}=await sb.from("branches").insert({name:val("bn"),lat:la,lng:lo,radius_m:r});if(error)return toast(error.message);await loadRef();render()}
   else if(a=="addsh"){if(!val("sn"))return toast("اكتب اسم الوردية");const {error}=await sb.from("shifts").insert({name:val("sn"),start_time:val("ss"),end_time:val("se"),grace_min:parseInt(val("sg"))||0});if(error)return toast(error.message);await loadRef();render()}
@@ -142,7 +222,7 @@ document.addEventListener("change",async ev=>{
   if(error)toast(error.message);else toast("تم الحفظ");
   if(e.dataset.id==me.id)boot()
 });
-boot();
+boot().catch(x=>toast("خطأ: "+x.message));
 </script>
 </body>
 </html>
