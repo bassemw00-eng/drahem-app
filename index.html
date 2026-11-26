@@ -31,6 +31,7 @@ header{border-bottom:1px solid #d9a90f55;padding-bottom:10px}
 .kc b{display:block;font-size:28px;color:var(--ac);margin:2px 0}
 .kc span{font-size:13px;color:var(--mu)}
 .kc.w{grid-column:1/-1;min-height:0}
+.kc span.tag{font-size:12px;color:var(--ac);background:var(--ac2)}
 .tag{font-size:12px;background:var(--ac2);color:var(--ac);padding:2px 8px;border-radius:8px;font-weight:600}
 nav{position:fixed;bottom:0;left:0;right:0;background:var(--sf);border-top:1px solid var(--bd);display:flex;overflow-x:auto;padding:6px 4px calc(6px + env(safe-area-inset-bottom))}
 nav button{flex:1;min-width:70px;background:transparent;color:var(--mu);font-size:14px;font-weight:500}nav button.on{color:var(--ac);font-weight:700}
@@ -134,7 +135,7 @@ async function vHome(){
   const present=A.filter(a=>!a.check_out),left=A.filter(a=>a.check_out),late=A.filter(a=>a.late_min>0),absent=P.filter(p=>!seen[p.id]&&p.role!="gm");
   const now=Date.now(),wm=a=>a.check_out?a.work_min:Math.max(0,Math.round((now-new Date(a.check_in))/60000));
   const wt=A.reduce((x,a)=>x+wm(a),0),ot=A.reduce((x,a)=>x+a.overtime_min,0);
-  let O=od.data||[];if(H.b)O=O.filter(o=>o.branch_id==H.b);
+  let O=(od.data||[]).filter(o=>!o.archived);if(H.b)O=O.filter(o=>o.branch_id==H.b);
   const cd=x=>new Date(x).toLocaleDateString("sv-SE",{timeZone:"Africa/Cairo"}),OPEN=["assigned","accepted","picked_up","on_the_way"];
   const onew=O.filter(o=>o.status=="new"),prog=O.filter(o=>OPEN.indexOf(o.status)>-1),dl=O.filter(o=>o.status=="delivered"&&cd(o.updated_at)==H.date),post=O.filter(o=>o.status=="postponed"),ref=O.filter(o=>o.status=="refused"&&cd(o.updated_at)==H.date);
   const nm=id=>(pm[id]||{}).full_name||"-";
@@ -158,11 +159,11 @@ async function vHome(){
   return h
 }
 setInterval(()=>{const ae=document.activeElement;if(me&&tab=="home"&&!H.detail&&!document.hidden&&(!ae||ae.tagName=="BODY"))render()},60000);
-const ST={new:"جديد",assigned:"مسند",accepted:"مقبول",picked_up:"مستلم",on_the_way:"في الطريق",delivered:"تم التوصيل",refused:"رفض الاستلام",postponed:"مؤجل"};
+const ST={new:"جديد",assigned:"مسند",accepted:"مقبول",picked_up:"مستلم",on_the_way:"في الطريق",delivered:"تم التوصيل",refused:"رفض الاستلام",postponed:"مؤجل",cancelled:"ملغي"};
 document.addEventListener("click",()=>{try{if(!AC)AC=new(window.AudioContext||window.webkitAudioContext)();AC.resume()}catch(e){}});
 function beep(){try{if(!AC)AC=new(window.AudioContext||window.webkitAudioContext)();AC.resume();[0,.25,.5].forEach((d,i)=>{const o=AC.createOscillator(),g=AC.createGain();o.frequency.value=i==1?1050:880;o.connect(g);g.connect(AC.destination);const t=AC.currentTime+d;g.gain.setValueAtTime(.3,t);g.gain.exponentialRampToValueAtTime(.001,t+.22);o.start(t);o.stop(t+.23)});if(navigator.vibrate)navigator.vibrate([200,100,200])}catch(e){}}
 async function refreshUnread(){const {count}=await sb.from("notifications").select("id",{count:"exact",head:true}).eq("user_id",me.id).eq("read",false);unread=count||0}
-function listen(){if(ch)return;ch=sb.channel("nt-"+me.id).on("postgres_changes",{event:"INSERT",schema:"public",table:"notifications",filter:"user_id=eq."+me.id},p=>{beep();toast(p.new.title+(p.new.body?": "+p.new.body:""));unread++;render()}).subscribe()}
+function listen(){if(ch)return;ch=sb.channel("nt-"+me.id).on("postgres_changes",{event:"INSERT",schema:"public",table:"notifications",filter:"user_id=eq."+me.id},p=>{beep();toast(p.new.title+(p.new.body?": "+p.new.body:""));unread++;if(!(tab=="ord"&&O.form))render()}).subscribe()}
 async function vNt(){
   const {data}=await sb.from("notifications").select("*").eq("user_id",me.id).order("id",{ascending:false}).limit(50);
   const rows=data||[];
@@ -170,13 +171,43 @@ async function vNt(){
   return'<div class="card"><h2>الإشعارات</h2><button class="sec" data-a="beep">اختبار الصوت</button><p class="msg">الصوت يشتغل والتطبيق مفتوح، بعد أول لمسة للشاشة.</p></div><div class="card">'+(rows.length?rows.map(r=>'<div class="it"'+(r.read?"":' style="border-right:3px solid var(--ac);padding-right:8px"')+"><b>"+esc(r.title)+"</b><small> | "+hm(r.created_at)+"</small><br>"+esc(r.body)+"</div>").join(""):'<p class="msg">لا توجد إشعارات.</p>')+"</div>"
 }
 async function vOrd(){return can("orders")?vOrdMgr():vOrdCour()}
+let O={f:"all",q:"",id:null,form:null};
+const PM={cash:"نقدي",card:"فيزا",wallet:"محفظة"},TY={delivery:"توصيل",pickup:"استلام من الفرع"},OPN=["assigned","accepted","picked_up","on_the_way"];
+const n2=x=>Math.round((+x||0)*100)/100,due=o=>o.collect_amount!=null?n2(o.collect_amount):n2((+o.amount||0)+(+o.delivery_fee||0));
+const dt=x=>x?new Date(x).toLocaleString("ar-EG",{timeZone:"Africa/Cairo",dateStyle:"short",timeStyle:"short"}):"-";
 async function vOrdMgr(){
-  const [o,cr]=await Promise.all([sb.from("orders").select("*,cr:profiles!orders_courier_id_fkey(full_name)").order("id",{ascending:false}).limit(60),sb.rpc("available_couriers")]);
-  const cs=cr.data||[],rows=o.data||[];
+  const [o,cr]=await Promise.all([sb.from("orders").select("*,cr:profiles!orders_courier_id_fkey(full_name)").order("id",{ascending:false}).limit(300),sb.rpc("available_couriers")]);
+  const rows=o.data||[],cs=cr.data||[];
   const copts=cs.map(c=>'<option value="'+c.cid+'">'+esc(c.cname)+" ("+c.cnt+")</option>").join("");
-  let h='<div class="card"><h2>طلب جديد</h2><label>اسم العميل</label><input id="oc"><label>رقم الموبايل</label><input id="op" inputmode="tel"><label>العنوان</label><input id="oa"><label>ملاحظات</label><input id="on"><div class="row"><div><label>المبلغ</label><input id="om" inputmode="decimal"></div><div><label>الفرع</label><select id="ob">'+opt(C.b,me.branch_id,"بدون")+'</select></div></div><button data-a="addord" style="width:100%;margin-top:12px">إضافة الطلب</button></div>';
-  h+='<div class="card"><h2>المناديب الحاضرون الآن ('+cs.length+")</h2>"+(cs.length?cs.map(c=>'<div class="it">'+esc(c.cname)+"<small> | طلبات مفتوحة: "+c.cnt+"</small></div>").join(""):'<p class="msg">لا يوجد مندوب مسجل حضور حالياً.</p>')+"</div>";
-  h+='<div class="card"><h2>الطلبات ('+rows.length+")</h2>"+(rows.length?rows.map(r=>'<div class="it"><b>#'+r.id+" "+esc(r.customer_name)+'</b> <span class="tag">'+ST[r.status]+"</span><small><br>"+esc(r.phone)+" | "+esc(r.address)+(r.cr?"<br>المندوب: "+esc(r.cr.full_name):"")+(r.result_note?"<br>ملاحظة: "+esc(r.result_note):"")+(r.postponed_until?"<br>مؤجل إلى: "+new Date(r.postponed_until).toLocaleString("ar-EG",{timeZone:"Africa/Cairo"}):"")+"</small>"+(["new","assigned","postponed"].indexOf(r.status)>-1&&cs.length?'<div class="row" style="margin-top:8px"><select id="c'+r.id+'">'+copts+'</select><button data-a="assign" data-id="'+r.id+'">'+(r.courier_id?"إعادة إسناد":"إسناد")+"</button></div>":"")+"</div>").join(""):'<p class="msg">لا توجد طلبات بعد.</p>')+"</div>";
+  if(O.form)return ordForm(rows.find(r=>r.id==O.form),copts);
+  if(O.id){const r=rows.find(x=>x.id==O.id);if(r)return ordDetail(r,copts,cs.length)}
+  const g={all:r=>!r.archived,new:r=>!r.archived&&r.status=="new",open:r=>!r.archived&&OPN.indexOf(r.status)>-1,done:r=>!r.archived&&r.status=="delivered",problem:r=>!r.archived&&(r.status=="postponed"||r.status=="refused"),cancelled:r=>!r.archived&&r.status=="cancelled",arch:r=>r.archived};
+  const FL={all:"كل الطلبات",new:"جديدة",open:"قيد التنفيذ",done:"تم التوصيل",problem:"مؤجلة / مرفوضة",cancelled:"ملغية",arch:"الأرشيف"};
+  const q=O.q.toLowerCase();
+  const list=rows.filter(g[O.f]).filter(r=>!q||(r.id+" "+r.customer_name+" "+r.phone+" "+r.address).toLowerCase().indexOf(q)>-1);
+  let h='<button data-a="onew" style="width:100%;margin-bottom:10px">+ طلب جديد</button><div class="card"><div class="row"><div><input id="oq" placeholder="بحث بالاسم أو الموبايل أو رقم الطلب" value="'+esc(O.q)+'"></div><div><select id="of">'+Object.keys(FL).map(k=>'<option value="'+k+'"'+(k==O.f?" selected":"")+">"+FL[k]+" ("+rows.filter(g[k]).length+")</option>").join("")+"</select></div></div></div>";
+  h+=list.length?'<div class="grid">'+list.map(r=>'<button class="kc w" data-a="oopen" data-id="'+r.id+'"><span>#'+r.id+' <span class="tag">'+ST[r.status]+"</span>"+(r.archived?' <span class="tag">مؤرشف</span>':"")+'</span><b style="font-size:18px;color:var(--tx)">'+esc(r.customer_name)+"</b><span>"+esc(r.area||r.address)+" | "+(r.cr?esc(r.cr.full_name):"لم يُسند")+" | تحصيل "+due(r)+"</span></button>").join("")+"</div>":'<div class="card"><p class="msg">لا توجد طلبات.</p></div>';
+  return h
+}
+function ordForm(r,copts){
+  r=r||{};const N=r.id==null;
+  const sel=(id,ob,cur)=>'<select id="'+id+'">'+Object.keys(ob).map(k=>'<option value="'+k+'"'+(k==cur?" selected":"")+">"+ob[k]+"</option>").join("")+"</select>";
+  const inp=(id,l,v,m)=>"<label>"+l+'</label><input id="'+id+'" value="'+esc(v==null?"":v)+'"'+(m?' inputmode="'+m+'"':"")+">";
+  return'<div class="card"><h2>'+(N?"طلب جديد":"تعديل الطلب #"+r.id)+"</h2>"+inp("fn","اسم العميل",r.customer_name)+inp("fp","رقم الموبايل",r.phone,"tel")+inp("fa","العنوان",r.address)+inp("far","المنطقة",r.area)+"<label>نوع الطلب</label>"+sel("fty",TY,r.order_type||"delivery")+'<div class="row"><div>'+inp("fam","قيمة الطلب",r.amount,"decimal")+"</div><div>"+inp("ffee","رسوم التوصيل",r.delivery_fee,"decimal")+"</div></div><label>طريقة الدفع</label>"+sel("fpm",PM,r.payment_method||"cash")+inp("fco","المطلوب تحصيله (فارغ = القيمة + التوصيل)",r.collect_amount,"decimal")+'<label>الفرع</label><select id="fbr">'+opt(C.b,N?me.branch_id:r.branch_id,"بدون")+"</select>"+(N?'<label>إسناد إلى مندوب (اختياري)</label><select id="fcr"><option value="">بدون مندوب الآن</option>'+copts+"</select>":"")+inp("fnt","ملاحظات خاصة",r.notes)+'<div class="big"><button data-a="osave">حفظ الطلب</button><button class="sec" data-a="oformx">إلغاء</button></div></div>'
+}
+async function ordDetail(r,copts,n){
+  const ev=await sb.from("order_events").select("*").eq("order_id",r.id).order("id");
+  const live=["new","assigned","accepted","picked_up","on_the_way","postponed"].indexOf(r.status)>-1;
+  const row=(k,v)=>'<div class="it" style="display:flex;justify-content:space-between;gap:10px"><small>'+k+"</small><span>"+v+"</span></div>";
+  let h='<button class="sec" data-a="oback" style="margin-bottom:10px">رجوع للطلبات</button>';
+  h+='<div class="card"><h2>#'+r.id+" "+esc(r.customer_name)+' <span class="tag">'+ST[r.status]+"</span>"+(r.archived?' <span class="tag">مؤرشف</span>':"")+"</h2>"+row("الموبايل",'<a href="tel:'+esc(r.phone)+'" style="color:var(--ac)">'+esc(r.phone)+"</a>")+row("العنوان",esc(r.address)+' <a style="color:var(--ac)" target="_blank" rel="noopener" href="https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(r.address)+'">خريطة</a>')+row("المنطقة",esc(r.area||"-"))+row("نوع الطلب",TY[r.order_type]||"-")+(r.notes?row("ملاحظات",esc(r.notes)):"")+"</div>";
+  h+='<div class="card"><h2>المبالغ</h2>'+row("قيمة الطلب",n2(r.amount))+row("رسوم التوصيل",n2(r.delivery_fee))+row("طريقة الدفع",PM[r.payment_method]||"-")+row("المطلوب تحصيله","<b>"+due(r)+"</b>")+"</div>";
+  h+='<div class="card"><h2>المندوب</h2>'+row("الاسم",r.cr?esc(r.cr.full_name):"لم يُسند")+row("وقت الإسناد",dt(r.assigned_at))+row("آخر تحديث",dt(r.updated_at))+(r.postponed_until?row("مؤجل إلى",dt(r.postponed_until)):"")+(r.result_note?row("ملاحظة",esc(r.result_note)):"")+"</div>";
+  h+='<div class="card"><h2>سجل الطلب</h2>'+((ev.data||[]).map(e=>'<div class="it">'+(ST[e.status]||e.status)+(e.note?" - "+esc(e.note):"")+"<small> | "+dt(e.at)+"</small></div>").join("")||'<p class="msg">لا يوجد سجل.</p>')+"</div>";
+  h+='<div class="card"><h2>الإجراءات</h2><button class="sec" data-a="oedit" style="width:100%;margin-bottom:8px">تعديل بيانات الطلب</button>';
+  if(live)h+=n?'<div class="row"><select id="c'+r.id+'">'+copts+'</select><button data-a="assign" data-id="'+r.id+'">'+(r.courier_id?"إعادة إسناد":"إسناد")+"</button></div>":'<p class="msg">لا يوجد مندوب مسجل حضور حالياً للإسناد.</p>';
+  if(r.status!="delivered"&&r.status!="cancelled")h+='<label>سبب الإلغاء (اختياري)</label><input id="cx'+r.id+'"><button class="del" data-a="ocancel" data-id="'+r.id+'" style="width:100%;margin-top:6px;border:1px solid var(--rd)">إلغاء الطلب</button>';
+  h+='<div class="row" style="margin-top:10px"><button class="sec" data-a="oarch" data-id="'+r.id+'" data-v="'+(r.archived?0:1)+'">'+(r.archived?"إرجاع من الأرشيف":"أرشفة")+"</button>"+(me.role=="gm"?'<button class="del" data-a="odel" data-id="'+r.id+'" style="border:1px solid var(--rd)">حذف نهائي</button>':"")+"</div></div>";
   return h
 }
 async function vOrdCour(){
@@ -189,7 +220,7 @@ async function vOrdCour(){
     else if(r.status=="accepted")a=btn(r,"picked_up","تم استلام الطلب");
     else if(r.status=="picked_up")a=btn(r,"on_the_way","في الطريق للعميل");
     else a='<label>ملاحظة (إلزامية عند الرفض أو التأجيل)</label><input id="n'+r.id+'"><label>موعد التأجيل (اختياري)</label><input type="datetime-local" id="d'+r.id+'"><div class="big"><button data-a="step" data-id="'+r.id+'" data-s="delivered">تم التوصيل</button><button class="out" data-a="step" data-id="'+r.id+'" data-s="postponed">تأجيل</button></div>'+btn(r,"refused","العميل رفض الاستلام","sec");
-    return'<div class="card"><h2>#'+r.id+" "+esc(r.customer_name)+' <span class="tag">'+ST[r.status]+'</span></h2><p class="msg">الموبايل: <a href="tel:'+esc(r.phone)+'" style="color:var(--ac)">'+esc(r.phone)+"</a><br>"+esc(r.address)+' <a style="color:var(--ac)" target="_blank" rel="noopener" href="https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(r.address)+'">فتح الخريطة</a>'+(r.notes?"<br>"+esc(r.notes):"")+(r.amount?"<br>المبلغ: "+r.amount:"")+"</p>"+a+"</div>"
+    return'<div class="card"><h2>#'+r.id+" "+esc(r.customer_name)+' <span class="tag">'+ST[r.status]+'</span></h2><p class="msg">الموبايل: <a href="tel:'+esc(r.phone)+'" style="color:var(--ac)">'+esc(r.phone)+"</a><br>"+esc(r.address)+' <a style="color:var(--ac)" target="_blank" rel="noopener" href="https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(r.address)+'">فتح الخريطة</a>'+(r.notes?"<br>"+esc(r.notes):"")+"<br>المطلوب تحصيله: "+due(r)+" ("+(PM[r.payment_method]||"-")+")</p>"+a+"</div>"
   };
   return(act.length?act.map(card).join(""):'<div class="card"><p class="msg">لا توجد مهام حالياً. سيصلك إشعار صوتي عند إسناد طلب.</p></div>')+(done.length?'<div class="card"><h2>آخر الطلبات المنتهية</h2>'+done.map(r=>'<div class="it">#'+r.id+" "+esc(r.customer_name)+' <span class="tag">'+ST[r.status]+"</span>"+(r.result_note?"<small><br>"+esc(r.result_note)+"</small>":"")+"</div>").join("")+"</div>":"")
 }
@@ -232,7 +263,7 @@ function exportXls(){
 
 document.addEventListener("click",async ev=>{
   const t=ev.target.closest("[data-t],[data-a],[data-del]");if(!t)return;
-  if(t.dataset.t){tab=t.dataset.t;H.detail=null;return render()}
+  if(t.dataset.t){tab=t.dataset.t;H.detail=null;O.id=null;O.form=null;return render()}
   if(t.dataset.del){const [tb,id]=t.dataset.del.split(":");const {error}=await sb.from(tb).delete().eq("id",id);if(error)return toast(error.message.indexOf("foreign")>-1?"لا يمكن الحذف لأنه مستخدم عند موظفين":error.message);await loadRef();return render()}
   const a=t.dataset.a;
   if(a=="login"){let u=val("lu");if(u.indexOf("@")<0)u=u.toLowerCase()+"@drahem.app";const {error}=await sb.auth.signInWithPassword({email:u,password:$("lp").value});if(error)toast("خطأ في الدخول: "+error.message);else boot().catch(x=>toast("خطأ: "+x.message))}
@@ -243,6 +274,20 @@ document.addEventListener("click",async ev=>{
   else if(a=="beep")beep();
   else if(a=="hopen"){H.detail=t.dataset.k;render()}
   else if(a=="hback"){H.detail=null;render()}
+  else if(a=="onew"){O.form="new";render()}
+  else if(a=="oopen"){O.id=+t.dataset.id;O.form=null;render()}
+  else if(a=="oback"){O.id=null;O.form=null;render()}
+  else if(a=="oedit"){O.form=O.id;render()}
+  else if(a=="oformx"){O.form=null;render()}
+  else if(a=="osave"){
+    const d={customer_name:val("fn"),phone:val("fp"),address:val("fa"),area:val("far")||null,order_type:$("fty").value,amount:parseFloat(val("fam"))||null,delivery_fee:parseFloat(val("ffee"))||0,payment_method:$("fpm").value,collect_amount:val("fco")===""?null:parseFloat(val("fco")),branch_id:+$("fbr").value||null,notes:val("fnt")||null};
+    if(!d.customer_name||!d.phone||!d.address)return toast("اكتب اسم العميل والموبايل والعنوان");
+    if(O.form=="new"){const {data,error}=await sb.from("orders").insert(d).select().single();if(error)return toast(error.message);const c=$("fcr").value;if(c){const r=await sb.rpc("assign_order",{p_order:data.id,p_courier:c});if(r.error)toast("تم حفظ الطلب لكن: "+r.error.message)}O.id=data.id;O.form=null}
+    else{d.updated_at=new Date().toISOString();const {error}=await sb.from("orders").update(d).eq("id",O.form);if(error)return toast(error.message);O.id=O.form;O.form=null}
+    toast("تم حفظ الطلب");render()}
+  else if(a=="ocancel"){const id=t.dataset.id;if(!confirm("إلغاء هذا الطلب؟"))return;const n=$("cx"+id);const {error}=await sb.rpc("cancel_order",{p_order:+id,p_note:n&&n.value.trim()?n.value.trim():null});toast(error?error.message:"تم إلغاء الطلب");render()}
+  else if(a=="oarch"){const {error}=await sb.from("orders").update({archived:t.dataset.v=="1"}).eq("id",t.dataset.id);toast(error?error.message:(t.dataset.v=="1"?"تمت الأرشفة":"تم الإرجاع من الأرشيف"));render()}
+  else if(a=="odel"){if(!confirm("حذف الطلب نهائياً؟ لا يمكن التراجع."))return;const {error}=await sb.from("orders").delete().eq("id",t.dataset.id);if(error)return toast(error.message);O.id=null;toast("تم حذف الطلب");render()}
   else if(a=="addord"){if(!val("oc")||!val("op")||!val("oa"))return toast("اكتب اسم العميل والموبايل والعنوان");const {error}=await sb.from("orders").insert({customer_name:val("oc"),phone:val("op"),address:val("oa"),notes:val("on")||null,amount:parseFloat(val("om"))||null,branch_id:+val("ob")||null});if(error)return toast(error.message);toast("تمت إضافة الطلب");render()}
   else if(a=="assign"){const id=t.dataset.id,c=$("c"+id).value;if(!c)return toast("لا يوجد مندوب حاضر للإسناد");const {error}=await sb.rpc("assign_order",{p_order:+id,p_courier:c});toast(error?error.message:"تم الإسناد وإرسال إشعار للمندوب");render()}
   else if(a=="step"){const id=t.dataset.id,st=t.dataset.s,n=$("n"+id),d=$("d"+id);const {error}=await sb.rpc("courier_step",{p_order:+id,p_status:st,p_note:n&&n.value.trim()?n.value.trim():null,p_until:d&&d.value?new Date(d.value).toISOString():null});toast(error?error.message:"تم التحديث");render()}
@@ -261,7 +306,7 @@ document.addEventListener("click",async ev=>{
   }
 });
 document.addEventListener("change",async ev=>{
-  const e=ev.target;if(e.id=="hd"||e.id=="hb"){H.date=$("hd").value||H.date;H.b=$("hb").value;return render()}if(!e.dataset.f)return;
+  const e=ev.target;if(e.id=="oq"||e.id=="of"){O.q=$("oq").value.trim();O.f=$("of").value;return render()}if(e.id=="hd"||e.id=="hb"){H.date=$("hd").value||H.date;H.b=$("hb").value;return render()}if(!e.dataset.f)return;
   if(e.dataset.id==me.id&&(e.dataset.f=="role"||e.dataset.f=="active")){toast("لا يمكنك تغيير دورك أو تعطيل حسابك");return render()}
   let v=e.value;if(e.dataset.f=="active")v=v=="true";else if(e.dataset.f!="role")v=+v||null;
   const {error}=await sb.from("profiles").update({[e.dataset.f]:v}).eq("id",e.dataset.id);
