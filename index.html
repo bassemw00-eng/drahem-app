@@ -101,29 +101,66 @@ async function render(){
   const tabs=TABS.filter(t=>t[0]=="att"||t[0]=="nt"||t[0]=="pay"||(t[0]=="home"?(can("reports")||can("orders")||can("employees")):can(t[2]))||(t[0]=="ord"&&me.role=="courier"));
   if(!tabs.some(t=>t[0]==tab))tab="att";
   $("dr").innerHTML='<div class="dh"><b>'+esc(me.full_name)+"</b><small>"+ROLES[me.role]+"</small></div>"+tabs.map(t=>'<button data-t="'+t[0]+'" class="'+(t[0]==tab?"on":"")+'">'+(t[0]=="pay"&&!can("payroll")?"مستحقاتي":t[1])+(t[0]=="nt"&&unread?" ("+unread+")":"")+"</button>").join("")+(DI?'<button class="sec" data-a="install" style="margin-top:12px">تثبيت التطبيق على الجهاز</button>':"");
-  $("v").innerHTML=await {aed:vAed,pay:vPay,req:vReq,perm:vPerm,map:vMap,home:vHome,att:vAtt,ord:vOrd,nt:vNt,rep:vRep,emp:vEmp,br:vBr,sh:vSh}[tab]();if(tab=="map")initMap();else killMap()
+  $("v").innerHTML=await {aed:vAed,pay:vPay,req:vReq,perm:vPerm,map:vMap,home:vHome,att:vAtt,ord:vOrd,nt:vNt,rep:vRep,emp:vEmp,br:vBr,sh:vSh}[tab]();if(tab=="map")initMap();else killMap();if(tab=="att"&&$("geo")&&(!GEO||Date.now()-GEO.ts>45000))refreshGeo()
 }
 function vLogin(){return'<div style="text-align:center;margin:6px 0 14px"><img alt="Darahem Pharmacy" src="'+LOGO+'" style="width:190px;height:190px;border-radius:24px"></div><div class="card"><h2>تسجيل الدخول</h2><label>اسم المستخدم أو الإيميل</label><input id="lu" autocapitalize="off" autocomplete="username"><label>كلمة السر</label><input id="lp" type="password" autocomplete="current-password"><button data-a="login" style="width:100%;margin-top:12px">دخول</button></div>'}
 
+let AT={t:"me",d:"",b:"",f:"all"},GEO=null;
+const box=(k,v)=>'<div style="background:var(--bg);border-radius:12px;padding:10px;flex:1"><small class="msg">'+k+'</small><br><b style="font-size:18px">'+v+"</b></div>";
+function geoHtml(){
+  const b=C.b.find(x=>x.id==me.branch_id);
+  const head='<div style="display:flex;justify-content:space-between;align-items:center"><h2 style="margin:0">تحقق الموقع الجغرافي</h2><button class="sec" data-a="geo">تحديث</button></div>';
+  if(!b)return head+'<p class="msg">لم يتم تحديد فرع لك.</p>';
+  if(!GEO)return head+'<p class="msg">'+(GEO===0?"تعذر تحديد موقعك. فعّل الموقع وأعطِ التطبيق الإذن.":"جاري تحديد موقعك...")+"</p>";
+  const d=Math.round(dist(GEO.lat,GEO.lng,b.lat,b.lng)),ok=d<=b.radius_m,col=ok?"var(--ac)":"var(--rd)";
+  return head+'<div style="margin-top:10px;padding:12px;border-radius:12px;border:1px solid '+col+'"><b style="color:'+col+'">'+(ok?"أنت داخل نطاق الفرع":"أنت خارج نطاق الفرع")+'</b><div style="height:8px;border-radius:6px;background:'+col+';margin:8px 0"></div><small class="msg">'+d+" م من الفرع | المسموح "+b.radius_m+" م | دقة ±"+Math.round(GEO.acc)+" م</small>"+(ok?"":'<p class="msg">'+(can("field_attendance")?"لديك صلاحية الدوام الميداني، وسيُسجَّل الحضور للمراجعة.":"لا يمكنك التسجيل خارج نطاق الفرع.")+"</p>")+'</div><small class="msg">'+esc(b.name)+" | نطاق "+b.radius_m+" م</small>"
+}
+function refreshGeo(){
+  const set=v=>{GEO=v;const e=$("geo");if(e)e.innerHTML=geoHtml()};
+  if(!navigator.geolocation)return set(0);
+  navigator.geolocation.getCurrentPosition(p=>set({lat:p.coords.latitude,lng:p.coords.longitude,acc:p.coords.accuracy,ts:Date.now()}),()=>set(0),{enableHighAccuracy:true,timeout:15000,maximumAge:10000})
+}
 async function vAtt(){
   if(!me.active)return'<div class="card"><h2>حسابك لم يتم تفعيله</h2><p class="msg">اطلب من المدير العام تفعيل حسابك وتحديد فرعك ووردتك.</p></div>';
+  const team=can("reports")||can("attendance_edit");
+  const bar=team?'<div class="card" style="padding:6px"><div class="row"><button'+(AT.t=="me"?"":' class="sec"')+' data-a="atab" data-v="me">سجلي الشخصي</button><button'+(AT.t=="team"?"":' class="sec"')+' data-a="atab" data-v="team">سجل الفريق</button></div></div>':"";
+  return bar+(team&&AT.t=="team"?await vAtTeam():await vAtMe())
+}
+async function vAtMe(){
   const b=C.b.find(x=>x.id==me.branch_id),s=C.s.find(x=>x.id==me.shift_id);
   const {data}=await sb.from("attendance").select("*").eq("user_id",me.id).order("check_in",{ascending:false}).limit(10);
   const rows=data||[],last=rows[0],open=last&&!last.check_out&&Date.now()-new Date(last.check_in)<72e6;
   if(me.role=="courier"){if(open)startTrack();else stopTrack()}
-  const today=new Date().toLocaleDateString("sv-SE",{timeZone:"Africa/Cairo"});
-  const st=open?"حاضر منذ "+hm(last.check_in)+(last.work_date!=today?" ("+last.work_date+")":""):(last&&last.work_date==today?"تم الانصراف "+hm(last.check_out):"لم تسجل حضور اليوم");
-  let h='<div class="card"><h2>تسجيل الآن</h2><p class="msg">'+(b?esc(b.name):"بدون فرع")+" | "+(s?esc(s.name)+" "+s.start_time.slice(0,5)+" - "+s.end_time.slice(0,5):"بدون وردية")+"<br><b>"+st+'</b></p><div class="big"><button data-a="in"'+(open||(last&&last.work_date==today)?" disabled":"")+'>تسجيل حضور</button><button class="out" data-a="out"'+(open?"":" disabled")+'>تسجيل انصراف</button></div><p class="msg" id="loc"></p>'+(me.role=="courier"&&open?'<p class="msg">تتبع الموقع: '+(WID!=null?"شغال":"متوقف")+"</p>"+(WID==null?'<button class="sec" data-a="trk">تشغيل التتبع</button>':""):"")+"</div>";
-  h+='<div class="card"><h2>آخر تسجيلاتي</h2>'+(rows.length?rows.map(r=>'<div class="it">'+r.work_date+"<small> | حضور "+hm(r.check_in)+" | انصراف "+hm(r.check_out)+"</small>"+(r.late_min?' <span class="late">تأخير '+fm(r.late_min)+"</span>":"")+(r.overtime_min?' <span class="ot">أوفر تايم '+fm(r.overtime_min)+"</span>":"")+"</div>").join(""):'<p class="msg">لا توجد تسجيلات بعد.</p>')+"</div>";
+  const today=new Date().toLocaleDateString("sv-SE",{timeZone:"Africa/Cairo"}),done=last&&last.work_date==today&&!!last.check_out;
+  const mins=open?Math.round((Date.now()-new Date(last.check_in))/60000):(done?last.work_min:0);
+  let h='<div class="card"><div style="display:flex;justify-content:space-between;align-items:center"><div><small class="msg">حالة الوردية</small><h2 style="margin:0">'+(open?"أنت في العمل الآن":(done?"انتهت ورديتك اليوم":"لم تسجل حضور اليوم"))+'</h2></div><span class="tag">'+(open?"نشطة":(done?"منتهية":"غير نشطة"))+'</span></div><div class="row" style="margin-top:12px">'+box("بداية الوردية",(open||done)?hm(last.check_in):(s?s.start_time.slice(0,5):"-"))+box("ساعات العمل",fm(mins))+'</div><p class="msg">'+(b?esc(b.name):"بدون فرع")+" | "+(s?esc(s.name)+" "+s.start_time.slice(0,5)+" - "+s.end_time.slice(0,5):"بدون وردية")+"</p></div>";
+  h+='<div class="card" id="geo">'+geoHtml()+"</div>";
+  h+='<div class="card"><input id="pnote" placeholder="ملاحظة (اختياري)"><div class="big"><button data-a="in"'+(open||(last&&last.work_date==today)?" disabled":"")+'>تسجيل حضور</button><button class="out" data-a="out"'+(open?"":" disabled")+'>تسجيل انصراف</button></div><p class="msg" id="loc"></p>'+(me.role=="courier"&&open?'<p class="msg">تتبع الموقع: '+(WID!=null?"شغال":"متوقف")+"</p>"+(WID==null?'<button class="sec" data-a="trk">تشغيل التتبع</button>':""):"")+"</div>";
+  h+='<div class="card"><h2>آخر تسجيلاتي</h2>'+(rows.length?rows.map(r=>'<div class="it">'+r.work_date+"<small> | حضور "+hm(r.check_in)+" | انصراف "+hm(r.check_out)+"</small>"+(r.field?' <span class="tag">ميداني'+(r.reviewed?" - معتمد":" - للمراجعة")+"</span>":"")+(r.late_min?' <span class="late">تأخير '+fm(r.late_min)+"</span>":"")+(r.overtime_min?' <span class="ot">أوفر تايم '+fm(r.overtime_min)+"</span>":"")+"</div>").join(""):'<p class="msg">لا توجد تسجيلات بعد.</p>')+"</div>";
   return h
+}
+async function vAtTeam(){
+  const tdy=new Date().toLocaleDateString("sv-SE",{timeZone:"Africa/Cairo"});
+  if(!AT.d)AT.d=tdy;
+  const [pr,at]=await Promise.all([sb.from("profiles").select("id,full_name,role,branch_id").eq("active",true).order("full_name"),AT.d==tdy?sb.from("attendance").select("*").or("work_date.eq."+AT.d+",check_out.is.null"):sb.from("attendance").select("*").eq("work_date",AT.d)]);
+  const am={};(at.data||[]).filter(a=>a.work_date==AT.d||Date.now()-new Date(a.check_in)<72e6).forEach(a=>am[a.user_id]=a);
+  const L=(pr.data||[]).filter(p=>(!AT.b||p.branch_id==AT.b)&&(p.role!="gm"||am[p.id]));
+  const st=p=>!am[p.id]?"absent":(am[p.id].check_out?"done":"open");
+  const F={all:["الكل",()=>true],open:["وردية مفتوحة",p=>st(p)=="open"],done:["مكتمل",p=>st(p)=="done"],absent:["غائب",p=>st(p)=="absent"],late:["متأخر",p=>am[p.id]&&am[p.id].late_min>0],field:["ميداني",p=>am[p.id]&&am[p.id].field],review:["بانتظار المراجعة",p=>am[p.id]&&am[p.id].field&&!am[p.id].reviewed]};
+  const rows=L.filter(F[AT.f]?F[AT.f][1]:F.all[1]),now=Date.now(),wmin=a=>a.check_out?a.work_min:Math.max(0,Math.round((now-new Date(a.check_in))/60000));
+  let h='<div class="card"><div class="row"><div><label>التاريخ</label><input type="date" id="atd" value="'+AT.d+'"></div><div><label>الفرع</label><select id="atb">'+opt(C.b,AT.b,"كل الفروع")+'</select></div></div><label>عرض</label><select id="atf">'+Object.keys(F).map(k=>'<option value="'+k+'"'+(k==AT.f?" selected":"")+">"+F[k][0]+" ("+L.filter(F[k][1]).length+")</option>").join("")+'</select><p class="msg">سجل '+Object.keys(am).length+"</p>"+(can("attendance_edit")?'<button class="sec" data-a="amanual" style="width:100%">تسجيل حضور يدوي</button>':"")+"</div>";
+  return h+(rows.length?rows.map(p=>{
+    const a=am[p.id],k=st(p),chip=k=="open"?'<span class="tag">وردية مفتوحة</span>':(k=="done"?'<span class="tag">مكتمل</span>':'<span class="tag" style="background:var(--rd);color:#fff">غائب</span>');
+    return'<div class="card"><div style="display:flex;justify-content:space-between;gap:8px"><div><b>'+esc(p.full_name)+'</b><br><small class="msg">'+esc(bn(p.branch_id))+" | "+ROLES[p.role]+"</small></div><div>"+chip+"</div></div>"+(a?'<div class="row" style="margin-top:8px"><small>حضور '+hm(a.check_in)+"</small><small>انصراف "+(a.check_out?hm(a.check_out):"-")+"</small><small>ساعات "+fm(wmin(a))+"</small></div><div style=\"margin-top:6px\">"+(a.late_min?'<span class="late">متأخر '+fm(a.late_min)+"</span>":'<span class="tag">في الموعد</span>')+(a.overtime_min?' <span class="ot">أوفر تايم '+fm(a.overtime_min)+"</span>":"")+(a.field?' <span class="tag">ميداني - '+(a.reviewed?"معتمد":"بانتظار المراجعة")+"</span>":"")+(a.manual?' <span class="tag">يدوي</span>':"")+"</div>"+(a.note||a.out_note?'<small class="msg">'+esc([a.note,a.out_note].filter(x=>x).join(" | "))+"</small>":""):"")+(can("attendance_edit")?'<div class="row" style="margin-top:8px"><button class="sec" data-a="aedit">تعديل</button>'+(a&&a.field&&!a.reviewed?'<button data-a="arev" data-id="'+a.id+'">اعتماد</button>':"")+"</div>":"")+"</div>"
+  }).join(""):'<div class="card"><p class="msg">لا توجد سجلات.</p></div>')
 }
 function punch(t){
   if(!navigator.geolocation)return toast("الجهاز لا يدعم تحديد الموقع");
   $("loc").textContent="جاري تحديد موقعك...";
   navigator.geolocation.getCurrentPosition(async p=>{
-    const {data,error}=await sb.rpc(t=="in"?"punch_in":"punch_out",{p_lat:p.coords.latitude,p_lng:p.coords.longitude,p_device:DID});
+    const n=$("pnote"),{data,error}=await sb.rpc(t=="in"?"punch_in":"punch_out",{p_lat:p.coords.latitude,p_lng:p.coords.longitude,p_device:DID,p_acc:p.coords.accuracy,p_note:n&&n.value.trim()?n.value.trim():null});
     if(error)toast(error.message);
-    else toast(t=="in"?"تم تسجيل الحضور"+(data.late_min?" (تأخير "+fm(data.late_min)+")":""):"تم تسجيل الانصراف"+(data.overtime_min?" (أوفر تايم "+fm(data.overtime_min)+")":""));
+    else toast(t=="in"?"تم تسجيل الحضور"+(data.field?" (ميداني للمراجعة)":"")+(data.late_min?" (تأخير "+fm(data.late_min)+")":""):"تم تسجيل الانصراف"+(data.overtime_min?" (أوفر تايم "+fm(data.overtime_min)+")":""));
     render()
   },()=>{$("loc").textContent="";toast("تعذر تحديد موقعك. فعّل الموقع وأعطِ التطبيق الإذن")},{enableHighAccuracy:true,timeout:15000,maximumAge:0})
 }
@@ -164,7 +201,7 @@ async function vHome(){
   const orow=o=>'<div class="it"><b>#'+o.id+" "+esc(o.customer_name)+'</b> <span class="tag">'+ST[o.status]+"</span><small><br>"+esc(o.phone)+" | "+esc(o.address)+(o.cr?"<br>المندوب: "+esc(o.cr.full_name):"")+(o.result_note?"<br>ملاحظة: "+esc(o.result_note):"")+"</small></div>";
   const D={
     emps:["إجمالي الموظفين",P.map(p=>'<div class="it">'+esc(p.full_name)+"<small> | "+ROLES[p.role]+" | "+esc(bn(p.branch_id))+"</small></div>").join("")],
-    present:["الموجودون الآن في العمل",present.map(a=>'<div class="it">'+esc(nm(a.user_id))+"<small> | حضر "+hm(a.check_in)+" | "+esc(bn(pm[a.user_id].branch_id))+"</small>"+(a.late_min?' <span class="late">تأخير '+fm(a.late_min)+"</span>":"")+"</div>").join("")],
+    present:["الموجودون الآن في العمل",present.map(a=>'<div class="it">'+esc(nm(a.user_id))+"<small> | حضر "+hm(a.check_in)+" | "+esc(bn(pm[a.user_id].branch_id))+"</small>"+(a.late_min?' <span class="late">تأخير '+fm(a.late_min)+"</span>":' <span class="tag">في الموعد</span>')+"</div>").join("")],
     absent:["الغائبون والمتأخرون",absent.map(p=>'<div class="it">'+esc(p.full_name)+"<small> | غائب | "+esc(bn(p.branch_id))+"</small></div>").join("")+late.map(a=>'<div class="it">'+esc(nm(a.user_id))+' <span class="late">متأخر '+fm(a.late_min)+"</span></div>").join("")],
     hours:["ساعات العمل والأوفر تايم",A.map(a=>'<div class="it">'+esc(nm(a.user_id))+"<small> | "+hm(a.check_in)+" - "+(a.check_out?hm(a.check_out):"لم ينصرف")+" | ساعات: "+fm(wm(a))+"</small>"+(a.overtime_min?' <span class="ot">أوفر تايم '+fm(a.overtime_min)+"</span>":"")+"</div>").join("")],
     onew:["طلبات جديدة",onew.map(orow).join("")],
@@ -172,7 +209,7 @@ async function vHome(){
     dl:["تم التسليم اليوم",dl.map(orow).join("")],
     post:["مؤجلة / مرفوضة",post.concat(ref).map(orow).join("")]
   };
-  if(H.detail&&D[H.detail])return'<button class="sec" data-a="hback" style="margin-bottom:10px">رجوع للرئيسية</button><div class="card"><h2>'+D[H.detail][0]+"</h2>"+(D[H.detail][1]||'<p class="msg">لا توجد بيانات.</p>')+"</div>";
+  if(H.detail&&D[H.detail])return'<button class="sec" data-a="hback" style="margin-bottom:10px">رجوع للرئيسية</button><div class="card"><h2>'+D[H.detail][0]+"</h2>"+(D[H.detail][1]||'<p class="msg">لا توجد بيانات.</p>')+"</div>"+(H.detail=="present"?'<button class="sec" data-a="hatt" style="width:100%">فتح صفحة الحضور</button>':"");
   const K=(k,t,n,sub)=>'<button class="kc" data-a="hopen" data-k="'+k+'"><span>'+t+"</span><b>"+n+"</b><span>"+(sub||"&nbsp;")+"</span></button>";
   let h='<div class="card"><div class="row"><div><label>التاريخ</label><input type="date" id="hd" value="'+H.date+'"></div><div><label>الفرع</label><select id="hb">'+opt(C.b,H.b,"كل الفروع")+"</select></div></div></div>";
   h+='<div class="grid">'+K("emps","إجمالي الموظفين",P.length,P.filter(p=>p.role=="courier").length+" مندوب توصيل")+K("present","موجودون الآن في العمل",present.length,left.length+" سجّلوا الانصراف")+K("absent","غائبون",absent.length,late.length+" متأخر")+K("hours","ساعات العمل",fm(wt),"أوفر تايم "+fm(ot));
@@ -294,7 +331,7 @@ function exportPay(){
 }
 let RQ={f:"all",q:"",id:null,form:null,items:[]};
 const RS={in_progress:"جاري الطلب",ordered:"تم الطلب",arrived:"تم الوصول للفرع",delivered:"تم التسليم",unavailable:"أصناف غير متوفرة حالياً"};
-const PL={attendance:"تسجيل الحضور",reports:"التقارير",employees:"الموظفون",branches:"الفروع",shifts:"الورديات",map:"الخريطة",orders:"طلبات التوصيل",requests:"طلبات العملاء",payroll:"المستحقات والرواتب",attendance_edit:"تعديل الحضور يدوياً"};
+const PL={attendance:"تسجيل الحضور",reports:"التقارير",employees:"الموظفون",branches:"الفروع",shifts:"الورديات",map:"الخريطة",orders:"طلبات التوصيل",requests:"طلبات العملاء",payroll:"المستحقات والرواتب",field_attendance:"الدوام الميداني (التسجيل خارج نطاق الفرع)",attendance_edit:"تعديل الحضور يدوياً"};
 function syncItems(){const iq=document.querySelectorAll(".iq");RQ.items=[...document.querySelectorAll(".in")].map((el,i)=>({n:el.value.trim(),q:parseFloat(iq[i].value)||1,u:(RQ.items[i]||{}).u||false}))}
 async function vPerm(){
   const {data}=await sb.from("role_permissions").select("*");
@@ -430,6 +467,11 @@ document.addEventListener("click",async ev=>{
   else if(a=="rep")runRep();
   else if(a=="xls")exportXls();
   else if(a=="beep")beep();
+  else if(a=="atab"){AT.t=t.dataset.v;render()}
+  else if(a=="geo"){GEO=null;if($("geo"))$("geo").innerHTML=geoHtml();refreshGeo()}
+  else if(a=="aedit"||a=="amanual"){AE.d=AT.d;tab="aed";render()}
+  else if(a=="arev"){const {error}=await sb.rpc("review_attendance",{p_id:+t.dataset.id,p_ok:true});toast(error?error.message:"تم الاعتماد");render()}
+  else if(a=="hatt"){tab="att";AT.t="team";AT.d=H.date;render()}
   else if(a=="rdev"){const {error}=await sb.rpc("reset_device",{p_user:t.dataset.id});toast(error?error.message:"تم فك ارتباط الجهاز");render()}
   else if(a=="bedit"){BE.t=t.dataset.t;BE.id=+t.dataset.id;render();window.scrollTo(0,0)}
   else if(a=="bcancel"){BE.id=null;BE.t=null;render()}
@@ -500,6 +542,7 @@ document.addEventListener("click",async ev=>{
 document.addEventListener("change",async ev=>{
   const e=ev.target;
   if(e.id=="aed_d"||e.id=="aed_b"){AE.d=$("aed_d").value||AE.d;AE.b=$("aed_b").value;return render()}
+  if(e.id=="atd"||e.id=="atb"||e.id=="atf"){AT.d=$("atd").value||AT.d;AT.b=$("atb").value;AT.f=$("atf").value;return render()}
   if(e.id=="pm"){PY.m=e.value||PY.m;PY.id=null;return render()}
   if(e.id=="qs"||e.id=="qf"){RQ.q=$("qs").value.trim();RQ.f=$("qf").value;return render()}
   if(e.dataset.u){const {error}=await sb.from("customer_request_items").update({unavailable:e.checked}).eq("id",e.dataset.u);toast(error?error.message:"تم الحفظ");return}
