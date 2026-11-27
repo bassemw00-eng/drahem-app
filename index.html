@@ -64,10 +64,11 @@ document.getElementById("hl").src=EMB;
 let DI=null;
 window.addEventListener("beforeinstallprompt",e=>{e.preventDefault();DI=e;if(typeof me!=="undefined"&&me)render()});
 if("serviceWorker" in navigator)navigator.serviceWorker.register("sw.js").catch(()=>{});
+const DID=(()=>{try{let d=localStorage.getItem("did");if(!d){d=(window.crypto&&crypto.randomUUID)?crypto.randomUUID():String(Date.now())+Math.random().toString(16).slice(2);localStorage.setItem("did",d)}return d}catch(e){return ""}})();
 const URL_="https://tzivcmkzkgpzkhpnudbp.supabase.co",KEY="sb_publishable_tRq9m7SyJQW3vVCfYVQ1Jw_RawfN87s";
 const sb=supabase.createClient(URL_,KEY);
 const ROLES={gm:"مدير عام",courier:"مندوب توصيل",supervisor:"مشرف مناديب",pharmacist:"صيدلي",assistant:"مساعد صيدلي",branch_manager:"مدير فرع",admin:"إداري",accountant:"محاسب",coder:"تكويد"};
-const TABS=[["home","الرئيسية",null],["att","الحضور","attendance"],["rep","التقارير","reports"],["ord","الطلبات","orders"],["map","الخريطة","map"],["req","طلبات العملاء","requests"],["pay","المستحقات والرواتب","payroll"],["perm","الصلاحيات",null],["nt","الإشعارات",null],["emp","الموظفون","employees"],["br","الفروع","branches"],["sh","الورديات","shifts"]];
+const TABS=[["home","الرئيسية",null],["att","الحضور","attendance"],["rep","التقارير","reports"],["ord","الطلبات","orders"],["map","الخريطة","map"],["req","طلبات العملاء","requests"],["aed","تعديل الحضور","attendance_edit"],["pay","المستحقات والرواتب","payroll"],["perm","الصلاحيات",null],["nt","الإشعارات",null],["emp","الموظفون","employees"],["br","الفروع","branches"],["sh","الورديات","shifts"]];
 let me=null,perms=[],tab="att",C={b:[],s:[]},unread=0,ch=null,AC=null;
 const $=i=>document.getElementById(i);
 const esc=s=>String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
@@ -83,6 +84,7 @@ async function boot(){
   if(!session){me=null;return render()}
   const {data:p,error:pe}=await sb.from("profiles").select("*").eq("id",session.user.id).maybeSingle();
   if(!p){me=null;toast("تعذر تحميل حسابك: "+(pe?pe.message:"لا يوجد ملف شخصي لهذا الحساب"));await sb.auth.signOut();return render()}
+  const bd=await sb.rpc("bind_device",{p_device:DID});if(bd.error){me=null;toast(bd.error.message);await sb.auth.signOut();return render()}
   me=p;
   const r=await sb.from("role_permissions").select("permission").eq("role",p.role);
   perms=(r.data||[]).map(x=>x.permission);await refreshUnread();listen();if(tab=="att"&&(can("reports")||can("orders")||can("employees")))tab="home";
@@ -99,7 +101,7 @@ async function render(){
   const tabs=TABS.filter(t=>t[0]=="att"||t[0]=="nt"||t[0]=="pay"||(t[0]=="home"?(can("reports")||can("orders")||can("employees")):can(t[2]))||(t[0]=="ord"&&me.role=="courier"));
   if(!tabs.some(t=>t[0]==tab))tab="att";
   $("dr").innerHTML='<div class="dh"><b>'+esc(me.full_name)+"</b><small>"+ROLES[me.role]+"</small></div>"+tabs.map(t=>'<button data-t="'+t[0]+'" class="'+(t[0]==tab?"on":"")+'">'+(t[0]=="pay"&&!can("payroll")?"مستحقاتي":t[1])+(t[0]=="nt"&&unread?" ("+unread+")":"")+"</button>").join("")+(DI?'<button class="sec" data-a="install" style="margin-top:12px">تثبيت التطبيق على الجهاز</button>':"");
-  $("v").innerHTML=await {pay:vPay,req:vReq,perm:vPerm,map:vMap,home:vHome,att:vAtt,ord:vOrd,nt:vNt,rep:vRep,emp:vEmp,br:vBr,sh:vSh}[tab]();if(tab=="map")initMap();else killMap()
+  $("v").innerHTML=await {aed:vAed,pay:vPay,req:vReq,perm:vPerm,map:vMap,home:vHome,att:vAtt,ord:vOrd,nt:vNt,rep:vRep,emp:vEmp,br:vBr,sh:vSh}[tab]();if(tab=="map")initMap();else killMap()
 }
 function vLogin(){return'<div style="text-align:center;margin:6px 0 14px"><img alt="Darahem Pharmacy" src="'+LOGO+'" style="width:190px;height:190px;border-radius:24px"></div><div class="card"><h2>تسجيل الدخول</h2><label>اسم المستخدم أو الإيميل</label><input id="lu" autocapitalize="off" autocomplete="username"><label>كلمة السر</label><input id="lp" type="password" autocomplete="current-password"><button data-a="login" style="width:100%;margin-top:12px">دخول</button></div>'}
 
@@ -107,11 +109,11 @@ async function vAtt(){
   if(!me.active)return'<div class="card"><h2>حسابك لم يتم تفعيله</h2><p class="msg">اطلب من المدير العام تفعيل حسابك وتحديد فرعك ووردتك.</p></div>';
   const b=C.b.find(x=>x.id==me.branch_id),s=C.s.find(x=>x.id==me.shift_id);
   const {data}=await sb.from("attendance").select("*").eq("user_id",me.id).order("check_in",{ascending:false}).limit(10);
-  const rows=data||[],last=rows[0],open=last&&!last.check_out;
+  const rows=data||[],last=rows[0],open=last&&!last.check_out&&Date.now()-new Date(last.check_in)<72e6;
   if(me.role=="courier"){if(open)startTrack();else stopTrack()}
   const today=new Date().toLocaleDateString("sv-SE",{timeZone:"Africa/Cairo"});
-  const st=open?"حاضر منذ "+hm(last.check_in):(last&&last.work_date==today?"تم الانصراف "+hm(last.check_out):"لم تسجل حضور اليوم");
-  let h='<div class="card"><h2>تسجيل الآن</h2><p class="msg">'+(b?esc(b.name):"بدون فرع")+" | "+(s?esc(s.name)+" "+s.start_time.slice(0,5)+" - "+s.end_time.slice(0,5):"بدون وردية")+"<br><b>"+st+'</b></p><div class="big"><button data-a="in"'+(last&&last.work_date==today?" disabled":"")+'>تسجيل حضور</button><button class="out" data-a="out"'+(open?"":" disabled")+'>تسجيل انصراف</button></div><p class="msg" id="loc"></p>'+(me.role=="courier"&&open?'<p class="msg">تتبع الموقع: '+(WID!=null?"شغال":"متوقف")+"</p>"+(WID==null?'<button class="sec" data-a="trk">تشغيل التتبع</button>':""):"")+"</div>";
+  const st=open?"حاضر منذ "+hm(last.check_in)+(last.work_date!=today?" ("+last.work_date+")":""):(last&&last.work_date==today?"تم الانصراف "+hm(last.check_out):"لم تسجل حضور اليوم");
+  let h='<div class="card"><h2>تسجيل الآن</h2><p class="msg">'+(b?esc(b.name):"بدون فرع")+" | "+(s?esc(s.name)+" "+s.start_time.slice(0,5)+" - "+s.end_time.slice(0,5):"بدون وردية")+"<br><b>"+st+'</b></p><div class="big"><button data-a="in"'+(open||(last&&last.work_date==today)?" disabled":"")+'>تسجيل حضور</button><button class="out" data-a="out"'+(open?"":" disabled")+'>تسجيل انصراف</button></div><p class="msg" id="loc"></p>'+(me.role=="courier"&&open?'<p class="msg">تتبع الموقع: '+(WID!=null?"شغال":"متوقف")+"</p>"+(WID==null?'<button class="sec" data-a="trk">تشغيل التتبع</button>':""):"")+"</div>";
   h+='<div class="card"><h2>آخر تسجيلاتي</h2>'+(rows.length?rows.map(r=>'<div class="it">'+r.work_date+"<small> | حضور "+hm(r.check_in)+" | انصراف "+hm(r.check_out)+"</small>"+(r.late_min?' <span class="late">تأخير '+fm(r.late_min)+"</span>":"")+(r.overtime_min?' <span class="ot">أوفر تايم '+fm(r.overtime_min)+"</span>":"")+"</div>").join(""):'<p class="msg">لا توجد تسجيلات بعد.</p>')+"</div>";
   return h
 }
@@ -119,7 +121,7 @@ function punch(t){
   if(!navigator.geolocation)return toast("الجهاز لا يدعم تحديد الموقع");
   $("loc").textContent="جاري تحديد موقعك...";
   navigator.geolocation.getCurrentPosition(async p=>{
-    const {data,error}=await sb.rpc(t=="in"?"punch_in":"punch_out",{p_lat:p.coords.latitude,p_lng:p.coords.longitude});
+    const {data,error}=await sb.rpc(t=="in"?"punch_in":"punch_out",{p_lat:p.coords.latitude,p_lng:p.coords.longitude,p_device:DID});
     if(error)toast(error.message);
     else toast(t=="in"?"تم تسجيل الحضور"+(data.late_min?" (تأخير "+fm(data.late_min)+")":""):"تم تسجيل الانصراف"+(data.overtime_min?" (أوفر تايم "+fm(data.overtime_min)+")":""));
     render()
@@ -130,25 +132,28 @@ async function vEmp(){
   const {data}=await sb.from("profiles").select("*").order("full_name");
   const sel=(id,f,html)=>'<select data-id="'+id+'" data-f="'+f+'">'+html+"</select>";
   let h='<div class="card"><h2>إضافة موظف</h2><label>الاسم</label><input id="ef"><label>اسم المستخدم (إنجليزي بدون مسافات)</label><input id="en" autocapitalize="off"><label>كلمة السر (6 أحرف على الأقل)</label><input id="ep" type="text" autocomplete="off"><label>الدور</label><select id="er">'+roleOpt("assistant")+'</select><div class="row"><div><label>الفرع</label><select id="eb">'+opt(C.b,"","بدون")+'</select></div><div><label>الوردية</label><select id="es">'+opt(C.s,"","بدون")+'</select></div></div><button data-a="addemp" style="width:100%;margin-top:12px">إضافة وتفعيل</button></div>';
-  h+='<div class="card"><h2>الموظفون ('+(data||[]).length+")</h2>"+(data||[]).map(p=>'<div class="it"><b>'+esc(p.full_name)+"</b>"+sel(p.id,"role",roleOpt(p.role))+'<div class="row">'+sel(p.id,"branch_id",opt(C.b,p.branch_id,"بدون فرع"))+sel(p.id,"shift_id",opt(C.s,p.shift_id,"بدون وردية"))+"</div>"+sel(p.id,"active",'<option value="true"'+(p.active?" selected":"")+'>مفعل</option><option value="false"'+(p.active?"":" selected")+">معطل</option>")+"</div>").join("")+"</div>";
+  h+='<div class="card"><h2>الموظفون ('+(data||[]).length+")</h2>"+(data||[]).map(p=>'<div class="it"><b>'+esc(p.full_name)+"</b>"+sel(p.id,"role",roleOpt(p.role))+'<div class="row">'+sel(p.id,"branch_id",opt(C.b,p.branch_id,"بدون فرع"))+sel(p.id,"shift_id",opt(C.s,p.shift_id,"بدون وردية"))+"</div>"+sel(p.id,"active",'<option value="true"'+(p.active?" selected":"")+'>مفعل</option><option value="false"'+(p.active?"":" selected")+">معطل</option>")+(p.role!="gm"?'<div class="row" style="align-items:center;margin-top:6px"><small>'+(p.device_id?"مرتبط بجهاز":"غير مرتبط بجهاز")+"</small>"+(p.device_id?'<button class="sec" data-a="rdev" data-id="'+p.id+'">فك ارتباط الجهاز</button>':"")+"</div>":"")+"</div>").join("")+"</div>";
   return h
 }
+let BE={t:null,id:null};
+function lst(a,t,f){return'<div class="card"><h2>القائمة ('+a.length+")</h2>"+(a.length?a.map(x=>'<div class="it" style="display:flex;justify-content:space-between;align-items:center;gap:6px"><div>'+f(x)+'</div><div style="display:flex;gap:4px;flex:none"><button class="sec" data-a="bedit" data-t="'+t+'" data-id="'+x.id+'">تعديل</button><button class="del" data-del="'+t+":"+x.id+'">حذف</button></div></div>').join(""):'<p class="msg">لا يوجد شيء بعد.</p>')+"</div>"}
 async function vBr(){
-  return'<div class="card"><h2>إضافة فرع</h2><label>اسم الفرع</label><input id="bn"><div class="row"><div><label>خط العرض</label><input id="bla" inputmode="decimal"></div><div><label>خط الطول</label><input id="blo" inputmode="decimal"></div></div><label>نطاق الحضور بالمتر</label><input id="br" inputmode="numeric" value="150"><div class="row" style="margin-top:10px"><button class="sec" data-a="here">موقعي الحالي</button><button data-a="addbr">حفظ</button></div><p class="msg">قف داخل الفرع واضغط "موقعي الحالي" لتحديد الإحداثيات بدقة.</p></div>'+lst(C.b,"branches",b=>esc(b.name)+"<small> | "+b.lat+" , "+b.lng+" | النطاق "+b.radius_m+" متر</small>")
+  const e=BE.t=="branches"?(C.b.find(x=>x.id==BE.id)||{}):{};
+  return'<div class="card"><h2>'+(e.id?"تعديل فرع":"إضافة فرع")+'</h2><label>اسم الفرع</label><input id="bn" value="'+esc(e.name||"")+'"><div class="row"><div><label>خط العرض</label><input id="bla" inputmode="decimal" value="'+(e.lat==null?"":e.lat)+'"></div><div><label>خط الطول</label><input id="blo" inputmode="decimal" value="'+(e.lng==null?"":e.lng)+'"></div></div><label>نطاق الحضور بالمتر</label><input id="br" inputmode="numeric" value="'+(e.radius_m||150)+'"><div class="row" style="margin-top:10px"><button class="sec" data-a="here">موقعي الحالي</button><button data-a="addbr">'+(e.id?"حفظ التعديل":"حفظ")+"</button>"+(e.id?'<button class="sec" data-a="bcancel">إلغاء</button>':"")+'</div><p class="msg">قف داخل الفرع واضغط "موقعي الحالي" لتحديد الإحداثيات بدقة.</p></div>'+lst(C.b,"branches",b=>esc(b.name)+"<small> | "+b.lat+" , "+b.lng+" | النطاق "+b.radius_m+" متر</small>")
 }
 async function vSh(){
-  return'<div class="card"><h2>إضافة وردية</h2><label>اسم الوردية</label><input id="sn"><div class="row"><div><label>البداية</label><input type="time" id="ss" value="09:00"></div><div><label>النهاية</label><input type="time" id="se" value="17:00"></div></div><label>سماح التأخير بالدقائق</label><input id="sg" inputmode="numeric" value="10"><button data-a="addsh" style="width:100%;margin-top:12px">حفظ</button></div>'+lst(C.s,"shifts",s=>esc(s.name)+"<small> | "+s.start_time.slice(0,5)+" - "+s.end_time.slice(0,5)+" | سماح "+s.grace_min+" د</small>")
+  const e=BE.t=="shifts"?(C.s.find(x=>x.id==BE.id)||{}):{};
+  return'<div class="card"><h2>'+(e.id?"تعديل وردية":"إضافة وردية")+'</h2><label>اسم الوردية</label><input id="sn" value="'+esc(e.name||"")+'"><div class="row"><div><label>البداية</label><input type="time" id="ss" value="'+(e.start_time?e.start_time.slice(0,5):"09:00")+'"></div><div><label>النهاية</label><input type="time" id="se" value="'+(e.end_time?e.end_time.slice(0,5):"17:00")+'"></div></div><label>سماح التأخير بالدقائق</label><input id="sg" inputmode="numeric" value="'+(e.grace_min==null?10:e.grace_min)+'"><div class="row" style="margin-top:12px"><button data-a="addsh">'+(e.id?"حفظ التعديل":"حفظ")+"</button>"+(e.id?'<button class="sec" data-a="bcancel">إلغاء</button>':"")+"</div></div>"+lst(C.s,"shifts",x=>esc(x.name)+"<small> | "+x.start_time.slice(0,5)+" - "+x.end_time.slice(0,5)+" | سماح "+x.grace_min+" د</small>")
 }
-function lst(a,t,f){return'<div class="card"><h2>القائمة ('+a.length+")</h2>"+(a.length?a.map(x=>'<div class="it" style="display:flex;justify-content:space-between;align-items:center"><div>'+f(x)+'</div><button class="del" data-del="'+t+":"+x.id+'">حذف</button></div>').join(""):'<p class="msg">لا يوجد شيء بعد.</p>')+"</div>"}
 const val=i=>$(i).value.trim();
 let H={date:"",b:"",detail:null};
 const bn=id=>(C.b.find(x=>x.id==id)||{}).name||"-";
 async function vHome(){
   if(!H.date)H.date=new Date().toLocaleDateString("sv-SE",{timeZone:"Africa/Cairo"});
-  const [pr,at,od]=await Promise.all([sb.from("profiles").select("id,full_name,role,branch_id").eq("active",true),sb.from("attendance").select("*").eq("work_date",H.date),sb.from("orders").select("*,cr:profiles!orders_courier_id_fkey(full_name)").order("id",{ascending:false}).limit(500)]);
+  const [pr,at,od]=await Promise.all([sb.from("profiles").select("id,full_name,role,branch_id").eq("active",true),(H.date==new Date().toLocaleDateString("sv-SE",{timeZone:"Africa/Cairo"})?sb.from("attendance").select("*").or("work_date.eq."+H.date+",check_out.is.null"):sb.from("attendance").select("*").eq("work_date",H.date)),sb.from("orders").select("*,cr:profiles!orders_courier_id_fkey(full_name)").order("id",{ascending:false}).limit(500)]);
   let P=pr.data||[];if(H.b)P=P.filter(p=>p.branch_id==H.b);
   const pm={};P.forEach(p=>pm[p.id]=p);
-  const A=(at.data||[]).filter(a=>pm[a.user_id]),seen={};A.forEach(a=>seen[a.user_id]=1);
+  const A=(at.data||[]).filter(a=>pm[a.user_id]&&(a.work_date==H.date||Date.now()-new Date(a.check_in)<72e5*10)),seen={};A.forEach(a=>seen[a.user_id]=1);
   const present=A.filter(a=>!a.check_out),left=A.filter(a=>a.check_out),late=A.filter(a=>a.late_min>0),absent=P.filter(p=>!seen[p.id]&&p.role!="gm");
   const now=Date.now(),wm=a=>a.check_out?a.work_min:Math.max(0,Math.round((now-new Date(a.check_in))/60000));
   const wt=A.reduce((x,a)=>x+wm(a),0),ot=A.reduce((x,a)=>x+a.overtime_min,0);
@@ -241,13 +246,22 @@ function initMap(){
     mlist()}).subscribe();
   MT=setInterval(()=>{MD.forEach(putMarker);mlist()},30000)
 }
+let AE={d:"",b:""};
+async function vAed(){
+  if(!AE.d)AE.d=new Date().toLocaleDateString("sv-SE",{timeZone:"Africa/Cairo"});
+  const [pr,at]=await Promise.all([sb.from("profiles").select("id,full_name,role,branch_id").eq("active",true).order("full_name"),sb.from("attendance").select("*").eq("work_date",AE.d)]);
+  let P=pr.data||[];if(AE.b)P=P.filter(p=>p.branch_id==AE.b);
+  const am={};(at.data||[]).forEach(a=>am[a.user_id]=a);
+  const tm=x=>x?new Date(x).toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit",timeZone:"Africa/Cairo"}):"";
+  return'<div class="card"><h2>تعديل الحضور يدوياً</h2><div class="row"><div><label>التاريخ</label><input type="date" id="aed_d" value="'+AE.d+'"></div><div><label>الفرع</label><select id="aed_b">'+opt(C.b,AE.b,"كل الفروع")+'</select></div></div><p class="msg">اكتب وقت الحضور والانصراف واضغط حفظ. التأخير والأوفر تايم بيتحسبوا تلقائياً من وردية الموظف.</p></div>'+P.map(p=>{const a=am[p.id];return'<div class="card"><b>'+esc(p.full_name)+"</b> "+(a?(a.edited_at?'<span class="tag">معدّل يدوياً</span>':'<span class="tag">مسجل</span>'):'<span class="tag">بدون سجل</span>')+'<div class="row"><div><label>حضور</label><input type="time" id="ai_'+p.id+'" value="'+tm(a&&a.check_in)+'"></div><div><label>انصراف</label><input type="time" id="ao_'+p.id+'" value="'+tm(a&&a.check_out)+'"></div></div><div class="row" style="margin-top:8px"><button data-a="asave" data-id="'+p.id+'">حفظ</button>'+(a?'<button class="del" data-a="adel" data-id="'+p.id+'" style="border:1px solid var(--rd)">حذف السجل</button>':"")+"</div></div>"}).join("")
+}
 let PY={m:"",id:null,rows:[]};
 const mo=()=>{if(!PY.m)PY.m=new Date().toLocaleDateString("sv-SE",{timeZone:"Africa/Cairo"}).slice(0,7);return PY.m+"-01"};
 const hr=m=>Math.round((+m||0)/60*100)/100;
 function slip(r){
-  const cur=PY.m==new Date().toLocaleDateString("sv-SE",{timeZone:"Africa/Cairo"}).slice(0,7);
+  const cur=PY.m==new Date().toLocaleDateString("sv-SE",{timeZone:"Africa/Cairo"}).slice(0,7),hl=r.r_pay_type=="hourly";
   const row=(k,v,c)=>'<div class="it" style="display:flex;justify-content:space-between;gap:10px"><small>'+k+"</small><span"+(c?' class="'+c+'"':"")+">"+v+"</span></div>";
-  return'<div class="card"><h2>'+esc(r.r_name)+" "+(r.r_paid_at?'<span class="tag">تم الصرف</span>':'<span class="tag">لم يُصرف</span>')+"</h2>"+row("الراتب الأساسي",n2(r.r_base))+row("أيام الحضور",r.r_days+" من "+r.r_work_days)+row("ساعات الحضور",fm(r.r_work_min))+row("أوفر تايم ("+fm(r.r_ot_min)+" × "+n2(r.r_ot_rate)+" للساعة)","+"+n2(r.r_ot_pay),"ot")+row("عمولة التوصيل ("+r.r_delivered+" × "+n2(r.r_comm_rate)+")","+"+n2(r.r_comm))+row("مكافآت","+"+n2(r.r_bonus))+row("خصم التأخير ("+fm(r.r_late_min)+" × "+n2(r.r_late_rate)+" للدقيقة)","-"+n2(r.r_late_ded),"late")+row("خصم الغياب ("+r.r_absent+" يوم × "+n2(r.r_abs_rate)+")","-"+n2(r.r_abs_ded),"late")+row("خصومات","-"+n2(r.r_ded),"late")+row("سلف","-"+n2(r.r_adv),"late")+row("<b>الصافي المستحق</b>","<b>"+n2(r.r_net)+"</b>")+(cur?'<p class="msg">الشهر الحالي لم ينتهِ: خصم الغياب يُحسب بعد انتهاء الشهر فقط.</p>':"")+"</div>"
+  return'<div class="card"><h2>'+esc(r.r_name)+" "+(r.r_paid_at?'<span class="tag">تم الصرف</span>':'<span class="tag">لم يُصرف</span>')+"</h2>"+row("نوع الحساب",hl?"بالساعة":"شهري")+(hl?row("أجر الساعات ("+fm(r.r_work_min-r.r_ot_min)+" × "+n2(r.r_hourly)+" للساعة)",n2(r.r_base_pay)):row("الراتب الأساسي",n2(r.r_base_pay)))+row("أيام الحضور",r.r_days+(hl?"":" من "+r.r_work_days))+row("ساعات الحضور",fm(r.r_work_min))+row("أوفر تايم ("+fm(r.r_ot_min)+" × "+n2(r.r_ot_rate)+" للساعة)","+"+n2(r.r_ot_pay),"ot")+row("عمولة التوصيل ("+r.r_delivered+" × "+n2(r.r_comm_rate)+")","+"+n2(r.r_comm))+row("مكافآت","+"+n2(r.r_bonus))+row("خصم التأخير ("+fm(r.r_late_min)+" × "+n2(r.r_late_rate)+" للدقيقة)","-"+n2(r.r_late_ded),"late")+(hl?"":row("خصم الغياب ("+r.r_absent+" يوم × "+n2(r.r_abs_rate)+")","-"+n2(r.r_abs_ded),"late"))+row("خصومات","-"+n2(r.r_ded),"late")+row("سلف","-"+n2(r.r_adv),"late")+row("<b>الصافي المستحق</b>","<b>"+n2(r.r_net)+"</b>")+(cur&&!hl?'<p class="msg">الشهر الحالي لم ينتهِ: خصم الغياب يُحسب بعد انتهاء الشهر فقط.</p>':"")+"</div>"
 }
 async function vPay(){
   const d=mo(),mgr=can("payroll");
@@ -268,19 +282,19 @@ const AK={bonus:"مكافأة",deduction:"خصم",advance:"سلفة"};
 async function payAdmin(r,d){
   const [st,ad]=await Promise.all([sb.from("pay_settings").select("*").eq("user_id",r.r_uid).maybeSingle(),sb.from("pay_adjustments").select("*").eq("user_id",r.r_uid).eq("month",d).order("id")]);
   const s=st.data||{},f=(i,l,v)=>"<label>"+l+'</label><input id="'+i+'" inputmode="decimal" value="'+(v==null?"":v)+'">';
-  let h='<div class="card"><h2>إعدادات الراتب</h2>'+f("ps_b","الراتب الأساسي الشهري",s.base_salary)+f("ps_o","سعر ساعة الأوفر تايم",s.ot_rate)+f("ps_l","خصم الدقيقة تأخير",s.late_rate)+f("ps_a","خصم اليوم غياب",s.absence_rate)+f("ps_c","عمولة كل طلب توصيل",s.order_commission)+f("ps_w","أيام العمل في الشهر",s.work_days==null?26:s.work_days)+'<button data-a="psave" data-id="'+r.r_uid+'" style="width:100%;margin-top:10px">حفظ الإعدادات</button></div>';
+  let h='<div class="card"><h2>إعدادات الراتب</h2><label>نوع الحساب</label><select id="ps_t"><option value="monthly"'+(s.pay_type=="hourly"?"":" selected")+'>شهري (راتب ثابت)</option><option value="hourly"'+(s.pay_type=="hourly"?" selected":"")+">بالساعة</option></select>"+f("ps_b","الراتب الأساسي الشهري (للشهري)",s.base_salary)+f("ps_h","سعر الساعة (للحساب بالساعة)",s.hourly_rate)+f("ps_o","سعر ساعة الأوفر تايم",s.ot_rate)+f("ps_l","خصم الدقيقة تأخير",s.late_rate)+f("ps_a","خصم اليوم غياب (للشهري)",s.absence_rate)+f("ps_c","عمولة كل طلب توصيل",s.order_commission)+f("ps_w","أيام العمل في الشهر",s.work_days==null?26:s.work_days)+'<button data-a="psave" data-id="'+r.r_uid+'" style="width:100%;margin-top:10px">حفظ الإعدادات</button></div>';
   h+='<div class="card"><h2>مكافآت وخصومات وسلف الشهر</h2>'+(ad.data||[]).map(x=>'<div class="it" style="display:flex;justify-content:space-between;align-items:center"><div>'+AK[x.kind]+" "+n2(x.amount)+"<small> | "+esc(x.note||"")+'</small></div><button class="del" data-a="padel" data-id="'+x.id+'">حذف</button></div>').join("")+'<div class="row"><select id="ak"><option value="bonus">مكافأة</option><option value="deduction">خصم</option><option value="advance">سلفة</option></select><input id="am" inputmode="decimal" placeholder="المبلغ"></div><input id="an" placeholder="ملاحظة" style="margin-top:6px"><button class="sec" data-a="padd" data-id="'+r.r_uid+'" style="width:100%;margin-top:8px">إضافة</button></div>';
   return h+'<div class="card"><button data-a="ppay" data-id="'+r.r_uid+'" data-v="'+(r.r_paid_at?0:1)+'" style="width:100%">'+(r.r_paid_at?"إلغاء تسجيل الصرف":"تسجيل أنه تم الصرف ("+n2(r.r_net)+")")+"</button></div>"
 }
 function exportPay(){
-  const rows=(PY.rows||[]).map(r=>({"الموظف":r.r_name,"الدور":ROLES[r.r_role],"الفرع":bn(r.r_branch),"الراتب الأساسي":+r.r_base,"أيام الحضور":r.r_days,"ساعات الحضور":hr(r.r_work_min),"دقائق التأخير":+r.r_late_min,"ساعات إضافية":hr(r.r_ot_min),"مبلغ الأوفر تايم":+r.r_ot_pay,"عدد التوصيلات":+r.r_delivered,"عمولة التوصيل":+r.r_comm,"مكافآت":+r.r_bonus,"خصم التأخير":+r.r_late_ded,"أيام الغياب":r.r_absent,"خصم الغياب":+r.r_abs_ded,"خصومات":+r.r_ded,"سلف":+r.r_adv,"الصافي":+r.r_net,"حالة الصرف":r.r_paid_at?"تم الصرف":"لم يُصرف"}));
+  const rows=(PY.rows||[]).map(r=>({"الموظف":r.r_name,"الدور":ROLES[r.r_role],"الفرع":bn(r.r_branch),"نوع الحساب":r.r_pay_type=="hourly"?"بالساعة":"شهري","الراتب الأساسي":+r.r_base,"سعر الساعة":+r.r_hourly,"الأساسي المستحق":+r.r_base_pay,"أيام الحضور":r.r_days,"ساعات الحضور":hr(r.r_work_min),"دقائق التأخير":+r.r_late_min,"ساعات إضافية":hr(r.r_ot_min),"مبلغ الأوفر تايم":+r.r_ot_pay,"عدد التوصيلات":+r.r_delivered,"عمولة التوصيل":+r.r_comm,"مكافآت":+r.r_bonus,"خصم التأخير":+r.r_late_ded,"أيام الغياب":r.r_absent,"خصم الغياب":+r.r_abs_ded,"خصومات":+r.r_ded,"سلف":+r.r_adv,"الصافي":+r.r_net,"حالة الصرف":r.r_paid_at?"تم الصرف":"لم يُصرف"}));
   const wb=XLSX.utils.book_new();wb.Workbook={Views:[{RTL:true}]};
   XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(rows),"المستحقات");
   XLSX.writeFile(wb,"payroll-"+PY.m+".xlsx")
 }
 let RQ={f:"all",q:"",id:null,form:null,items:[]};
 const RS={in_progress:"جاري الطلب",ordered:"تم الطلب",arrived:"تم الوصول للفرع",delivered:"تم التسليم",unavailable:"أصناف غير متوفرة حالياً"};
-const PL={attendance:"تسجيل الحضور",reports:"التقارير",employees:"الموظفون",branches:"الفروع",shifts:"الورديات",map:"الخريطة",orders:"طلبات التوصيل",requests:"طلبات العملاء",payroll:"المستحقات والرواتب"};
+const PL={attendance:"تسجيل الحضور",reports:"التقارير",employees:"الموظفون",branches:"الفروع",shifts:"الورديات",map:"الخريطة",orders:"طلبات التوصيل",requests:"طلبات العملاء",payroll:"المستحقات والرواتب",attendance_edit:"تعديل الحضور يدوياً"};
 function syncItems(){const iq=document.querySelectorAll(".iq");RQ.items=[...document.querySelectorAll(".in")].map((el,i)=>({n:el.value.trim(),q:parseFloat(iq[i].value)||1,u:(RQ.items[i]||{}).u||false}))}
 async function vPerm(){
   const {data}=await sb.from("role_permissions").select("*");
@@ -407,7 +421,7 @@ function exportXls(){
 
 document.addEventListener("click",async ev=>{
   const t=ev.target.closest("[data-t],[data-a],[data-del]");if(!t)return;
-  if(t.dataset.t){document.body.classList.remove("mo");tab=t.dataset.t;H.detail=null;O.id=null;O.form=null;RQ.id=null;RQ.form=null;PY.id=null;return render()}
+  if(t.dataset.t){document.body.classList.remove("mo");tab=t.dataset.t;H.detail=null;O.id=null;O.form=null;RQ.id=null;RQ.form=null;PY.id=null;BE.id=null;BE.t=null;return render()}
   if(t.dataset.del){const [tb,id]=t.dataset.del.split(":");const {error}=await sb.from(tb).delete().eq("id",id);if(error)return toast(error.message.indexOf("foreign")>-1?"لا يمكن الحذف لأنه مستخدم عند موظفين":error.message);await loadRef();return render()}
   const a=t.dataset.a;
   if(a=="login"){let u=val("lu");if(u.indexOf("@")<0)u=u.toLowerCase()+"@drahem.app";const {error}=await sb.auth.signInWithPassword({email:u,password:$("lp").value});if(error)toast("خطأ في الدخول: "+error.message);else boot().catch(x=>toast("خطأ: "+x.message))}
@@ -416,10 +430,15 @@ document.addEventListener("click",async ev=>{
   else if(a=="rep")runRep();
   else if(a=="xls")exportXls();
   else if(a=="beep")beep();
+  else if(a=="rdev"){const {error}=await sb.rpc("reset_device",{p_user:t.dataset.id});toast(error?error.message:"تم فك ارتباط الجهاز");render()}
+  else if(a=="bedit"){BE.t=t.dataset.t;BE.id=+t.dataset.id;render();window.scrollTo(0,0)}
+  else if(a=="bcancel"){BE.id=null;BE.t=null;render()}
+  else if(a=="asave"){const id=t.dataset.id,i=$("ai_"+id).value,o=$("ao_"+id).value;if(!i)return toast("اكتب وقت الحضور");const {error}=await sb.rpc("set_attendance",{p_user:id,p_date:AE.d,p_in:i,p_out:o||null});toast(error?error.message:"تم الحفظ");render()}
+  else if(a=="adel"){if(!confirm("حذف سجل الحضور لهذا اليوم؟"))return;const {error}=await sb.rpc("delete_attendance",{p_user:t.dataset.id,p_date:AE.d});toast(error?error.message:"تم الحذف");render()}
   else if(a=="popen"){PY.id=t.dataset.id;render()}
   else if(a=="pback"){PY.id=null;render()}
   else if(a=="pxls")exportPay();
-  else if(a=="psave"){const n=i=>parseFloat($(i).value)||0;const {error}=await sb.from("pay_settings").upsert({user_id:t.dataset.id,base_salary:n("ps_b"),ot_rate:n("ps_o"),late_rate:n("ps_l"),absence_rate:n("ps_a"),order_commission:n("ps_c"),work_days:parseInt($("ps_w").value)||26});toast(error?error.message:"تم حفظ الإعدادات");render()}
+  else if(a=="psave"){const n=i=>parseFloat($(i).value)||0;const {error}=await sb.from("pay_settings").upsert({user_id:t.dataset.id,base_salary:n("ps_b"),ot_rate:n("ps_o"),late_rate:n("ps_l"),absence_rate:n("ps_a"),order_commission:n("ps_c"),work_days:parseInt($("ps_w").value)||26,pay_type:$("ps_t").value,hourly_rate:n("ps_h")});toast(error?error.message:"تم حفظ الإعدادات");render()}
   else if(a=="padd"){const am=parseFloat($("am").value);if(!(am>0))return toast("اكتب مبلغاً صحيحاً");const {error}=await sb.from("pay_adjustments").insert({user_id:t.dataset.id,month:mo(),kind:$("ak").value,amount:am,note:$("an").value.trim()||null});toast(error?error.message:"تمت الإضافة");render()}
   else if(a=="padel"){const {error}=await sb.from("pay_adjustments").delete().eq("id",t.dataset.id);toast(error?error.message:"تم الحذف");render()}
   else if(a=="ppay"){const r=PY.rows.find(x=>x.r_uid==t.dataset.id);const {error}=await(t.dataset.v=="1"?sb.from("pay_paid").upsert({user_id:t.dataset.id,month:mo(),amount:r.r_net,paid_at:new Date().toISOString()}):sb.from("pay_paid").delete().eq("user_id",t.dataset.id).eq("month",mo()));toast(error?error.message:"تم التحديث");render()}
@@ -465,8 +484,8 @@ document.addEventListener("click",async ev=>{
   else if(a=="assign"){const id=t.dataset.id,c=$("c"+id).value;if(!c)return toast("لا يوجد مندوب حاضر للإسناد");const {error}=await sb.rpc("assign_order",{p_order:+id,p_courier:c});toast(error?error.message:"تم الإسناد وإرسال إشعار للمندوب");render()}
   else if(a=="step"){const id=t.dataset.id,st=t.dataset.s,n=$("n"+id),d=$("d"+id);const {error}=await sb.rpc("courier_step",{p_order:+id,p_status:st,p_note:n&&n.value.trim()?n.value.trim():null,p_until:d&&d.value?new Date(d.value).toISOString():null});toast(error?error.message:"تم التحديث");render()}
   else if(a=="here"){navigator.geolocation.getCurrentPosition(p=>{$("bla").value=p.coords.latitude.toFixed(6);$("blo").value=p.coords.longitude.toFixed(6);toast("تم تحديد الموقع، الدقة تقريباً "+Math.round(p.coords.accuracy)+" متر")},()=>toast("تعذر تحديد موقعك"),{enableHighAccuracy:true,timeout:15000})}
-  else if(a=="addbr"){const la=parseFloat(val("bla")),lo=parseFloat(val("blo")),r=parseInt(val("br"));if(!val("bn")||isNaN(la)||isNaN(lo)||!r)return toast("اكتب الاسم والإحداثيات والنطاق");const {error}=await sb.from("branches").insert({name:val("bn"),lat:la,lng:lo,radius_m:r});if(error)return toast(error.message);await loadRef();render()}
-  else if(a=="addsh"){if(!val("sn"))return toast("اكتب اسم الوردية");const {error}=await sb.from("shifts").insert({name:val("sn"),start_time:val("ss"),end_time:val("se"),grace_min:parseInt(val("sg"))||0});if(error)return toast(error.message);await loadRef();render()}
+  else if(a=="addbr"){const la=parseFloat(val("bla")),lo=parseFloat(val("blo")),r=parseInt(val("br"));if(!val("bn")||isNaN(la)||isNaN(lo)||!r)return toast("اكتب الاسم والإحداثيات والنطاق");const row={name:val("bn"),lat:la,lng:lo,radius_m:r};const {error}=await(BE.id?sb.from("branches").update(row).eq("id",BE.id):sb.from("branches").insert(row));if(error)return toast(error.message);BE.id=null;BE.t=null;toast("تم الحفظ");await loadRef();render()}
+  else if(a=="addsh"){if(!val("sn"))return toast("اكتب اسم الوردية");const row={name:val("sn"),start_time:val("ss"),end_time:val("se"),grace_min:parseInt(val("sg"))||0};const {error}=await(BE.id?sb.from("shifts").update(row).eq("id",BE.id):sb.from("shifts").insert(row));if(error)return toast(error.message);BE.id=null;BE.t=null;toast("تم الحفظ");await loadRef();render()}
   else if(a=="addemp"){
     const un=val("en").toLowerCase(),nm=val("ef"),pw=$("ep").value;
     if(!nm||!un||pw.length<6)return toast("اكتب الاسم واسم المستخدم وكلمة سر 6 أحرف على الأقل");
@@ -480,6 +499,7 @@ document.addEventListener("click",async ev=>{
 });
 document.addEventListener("change",async ev=>{
   const e=ev.target;
+  if(e.id=="aed_d"||e.id=="aed_b"){AE.d=$("aed_d").value||AE.d;AE.b=$("aed_b").value;return render()}
   if(e.id=="pm"){PY.m=e.value||PY.m;PY.id=null;return render()}
   if(e.id=="qs"||e.id=="qf"){RQ.q=$("qs").value.trim();RQ.f=$("qf").value;return render()}
   if(e.dataset.u){const {error}=await sb.from("customer_request_items").update({unavailable:e.checked}).eq("id",e.dataset.u);toast(error?error.message:"تم الحفظ");return}
