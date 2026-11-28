@@ -48,6 +48,7 @@ body.mo #dr{transform:none}body.mo #ov{display:block}
 nav{position:fixed;bottom:0;left:0;right:0;background:var(--sf);border-top:1px solid var(--bd);display:flex;overflow-x:auto;padding:6px 4px calc(6px + env(safe-area-inset-bottom))}
 nav button{flex:1;min-width:70px;background:transparent;color:var(--mu);font-size:14px;font-weight:500}nav button.on{color:var(--ac);font-weight:700}
 #toast{position:fixed;top:calc(10px + env(safe-area-inset-top));left:12px;right:12px;background:var(--tx);color:var(--bg);padding:12px;border-radius:12px;display:none;z-index:9;text-align:center}
+@media print{header,#dr,#ov,.noprint{display:none!important}body{padding:0;background:#fff;color:#000}.card,.kc{background:#fff;color:#000;border-color:#999}.kc b{color:#000}}
 </style>
 </head>
 <body>
@@ -68,7 +69,7 @@ const DID=(()=>{try{let d=localStorage.getItem("did");if(!d){d=(window.crypto&&c
 const URL_="https://tzivcmkzkgpzkhpnudbp.supabase.co",KEY="sb_publishable_tRq9m7SyJQW3vVCfYVQ1Jw_RawfN87s";
 const sb=supabase.createClient(URL_,KEY);
 const ROLES={gm:"مدير عام",courier:"مندوب توصيل",supervisor:"مشرف مناديب",pharmacist:"صيدلي",assistant:"مساعد صيدلي",branch_manager:"مدير فرع",admin:"إداري",accountant:"محاسب",coder:"تكويد"};
-const TABS=[["home","الرئيسية",null],["att","الحضور","attendance"],["rep","التقارير","reports"],["ord","الطلبات","orders"],["map","الخريطة","map"],["req","طلبات العملاء","requests"],["aed","تعديل الحضور","attendance_edit"],["pay","المستحقات والرواتب","payroll"],["perm","الصلاحيات",null],["nt","الإشعارات",null],["emp","الموظفون","employees"],["br","الفروع","branches"],["sh","الورديات","shifts"]];
+const TABS=[["home","الرئيسية",null],["att","الحضور","attendance"],["rep","التقارير","reports"],["ord","الطلبات","orders"],["map","الخريطة","map"],["req","طلبات العملاء","requests"],["aed","تعديل الحضور","attendance_edit"],["pay","المستحقات والرواتب","payroll"],["perm","الصلاحيات",null],["setup","تهيئة النظام","branches"],["nt","الإشعارات",null],["emp","الموظفون","employees"],["br","الفروع","branches"],["sh","الورديات","shifts"]];
 let me=null,perms=[],tab="att",C={b:[],s:[]},unread=0,ch=null,AC=null;
 const $=i=>document.getElementById(i);
 const esc=s=>String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
@@ -101,7 +102,7 @@ async function render(){
   const tabs=TABS.filter(t=>t[0]=="att"||t[0]=="nt"||t[0]=="pay"||(t[0]=="home"?(can("reports")||can("orders")||can("employees")):can(t[2]))||(t[0]=="ord"&&me.role=="courier"));
   if(!tabs.some(t=>t[0]==tab))tab="att";
   $("dr").innerHTML='<div class="dh"><b>'+esc(me.full_name)+"</b><small>"+ROLES[me.role]+"</small></div>"+tabs.map(t=>'<button data-t="'+t[0]+'" class="'+(t[0]==tab?"on":"")+'">'+(t[0]=="pay"&&!can("payroll")?"مستحقاتي":t[1])+(t[0]=="nt"&&unread?" ("+unread+")":"")+"</button>").join("")+(DI?'<button class="sec" data-a="install" style="margin-top:12px">تثبيت التطبيق على الجهاز</button>':"");
-  $("v").innerHTML=await {aed:vAed,pay:vPay,req:vReq,perm:vPerm,map:vMap,home:vHome,att:vAtt,ord:vOrd,nt:vNt,rep:vRep,emp:vEmp,br:vBr,sh:vSh}[tab]();if(tab=="map")initMap();else killMap();if(tab=="att"&&$("geo")&&(!GEO||Date.now()-GEO.ts>45000))refreshGeo()
+  $("v").innerHTML=await {aed:vAed,setup:vSetup,pay:vPay,req:vReq,perm:vPerm,map:vMap,home:vHome,att:vAtt,ord:vOrd,nt:vNt,rep:vRep,emp:vEmp,br:vBr,sh:vSh}[tab]();if(tab=="map")initMap();else killMap();if(tab=="att"&&$("geo")&&(!GEO||Date.now()-GEO.ts>45000))refreshGeo()
 }
 function vLogin(){return'<div style="text-align:center;margin:6px 0 14px"><img alt="Darahem Pharmacy" src="'+LOGO+'" style="width:190px;height:190px;border-radius:24px"></div><div class="card"><h2>تسجيل الدخول</h2><label>اسم المستخدم أو الإيميل</label><input id="lu" autocapitalize="off" autocomplete="username"><label>كلمة السر</label><input id="lp" type="password" autocomplete="current-password"><button data-a="login" style="width:100%;margin-top:12px">دخول</button></div>'}
 
@@ -113,7 +114,7 @@ function geoHtml(){
   if(!b)return head+'<p class="msg">لم يتم تحديد فرع لك.</p>';
   if(!GEO)return head+'<p class="msg">'+(GEO===0?"تعذر تحديد موقعك. فعّل الموقع وأعطِ التطبيق الإذن.":"جاري تحديد موقعك...")+"</p>";
   const d=Math.round(dist(GEO.lat,GEO.lng,b.lat,b.lng)),ok=d<=b.radius_m,col=ok?"var(--ac)":"var(--rd)";
-  return head+'<div style="margin-top:10px;padding:12px;border-radius:12px;border:1px solid '+col+'"><b style="color:'+col+'">'+(ok?"أنت داخل نطاق الفرع":"أنت خارج نطاق الفرع")+'</b><div style="height:8px;border-radius:6px;background:'+col+';margin:8px 0"></div><small class="msg">'+d+" م من الفرع | المسموح "+b.radius_m+" م | دقة ±"+Math.round(GEO.acc)+" م</small>"+(ok?"":'<p class="msg">'+(can("field_attendance")?"لديك صلاحية الدوام الميداني، وسيُسجَّل الحضور للمراجعة.":"لا يمكنك التسجيل خارج نطاق الفرع.")+"</p>")+'</div><small class="msg">'+esc(b.name)+" | نطاق "+b.radius_m+" م</small>"
+  return head+'<div style="margin-top:10px;padding:12px;border-radius:12px;border:1px solid '+col+'"><b style="color:'+col+'">'+(ok?"أنت داخل نطاق الفرع":"أنت خارج نطاق الفرع")+'</b><div style="height:8px;border-radius:6px;background:'+col+';margin:8px 0"></div><small class="msg">'+d+" م من الفرع | المسموح "+b.radius_m+" م | دقة ±"+Math.round(GEO.acc)+" م</small>"+(ok?"":'<p class="msg">'+((can("field_attendance")||me.field_ok)?"لديك صلاحية الدوام الميداني، وسيُسجَّل الحضور للمراجعة.":"لا يمكنك التسجيل خارج نطاق الفرع.")+"</p>")+'</div><small class="msg">'+esc(b.name)+" | نطاق "+b.radius_m+" م</small>"
 }
 function refreshGeo(){
   const set=v=>{GEO=v;const e=$("geo");if(e)e.innerHTML=geoHtml()};
@@ -165,11 +166,21 @@ function punch(t){
   },()=>{$("loc").textContent="";toast("تعذر تحديد موقعك. فعّل الموقع وأعطِ التطبيق الإذن")},{enableHighAccuracy:true,timeout:15000,maximumAge:0})
 }
 
+let EM={q:"",r:""};
+async function vSetup(){
+  const {data}=await sb.from("profiles").select("id,branch_id,shift_id").eq("active",true);
+  const P=data||[],un=P.filter(p=>!p.branch_id||!p.shift_id).length,b0=C.b.some(b=>!b.lat&&!b.lng);
+  const it=(ok,t,d)=>'<div class="card" style="border-color:'+(ok?"var(--ac)":"var(--bd)")+';margin-bottom:8px"><b>'+(ok?"✔ ":"○ ")+t+'</b><br><small class="msg">'+d+"</small></div>";
+  const nxt=!C.b.length?"أضف أول فرع من تبويب الفروع":(!C.s.length?"أضف وردية عمل من تبويب الورديات":(un?"اربط "+un+" موظف بفرع ووردية من تبويب الموظفون":"النظام جاهز للتشغيل"));
+  return'<div class="card"><h2>تهيئة النظام</h2><p class="msg">أضف فروعك وورديات العمل لتبدأ التشغيل الفعلي</p></div>'+it(C.b.length>0,"إضافة فرع واحد على الأقل",C.b.length+" فرع مسجل")+it(C.b.length>0&&!b0,"تحديد إحداثيات كل فرع",b0?"بعض الفروع بدون موقع جغرافي":"كل الفروع لها موقع جغرافي")+it(C.s.length>0,"إضافة وردية عمل واحدة على الأقل",C.s.length+" وردية معرّفة")+it(P.length>0&&!un,"ربط كل موظف بفرع ووردية",un?un+" موظف بدون فرع أو وردية":"كل الموظفين مربوطين")+'<div class="card"><b>الخطوة التالية:</b> '+nxt+"</div>"
+}
+
 async function vEmp(){
   const {data}=await sb.from("profiles").select("*").order("full_name");
+  const list=(data||[]).filter(p=>(!EM.q||p.full_name.toLowerCase().indexOf(EM.q.toLowerCase())>-1)&&(!EM.r||p.role==EM.r));
   const sel=(id,f,html)=>'<select data-id="'+id+'" data-f="'+f+'">'+html+"</select>";
   let h='<div class="card"><h2>إضافة موظف</h2><label>الاسم</label><input id="ef"><label>اسم المستخدم (إنجليزي بدون مسافات)</label><input id="en" autocapitalize="off"><label>كلمة السر (6 أحرف على الأقل)</label><input id="ep" type="text" autocomplete="off"><label>الدور</label><select id="er">'+roleOpt("assistant")+'</select><div class="row"><div><label>الفرع</label><select id="eb">'+opt(C.b,"","بدون")+'</select></div><div><label>الوردية</label><select id="es">'+opt(C.s,"","بدون")+'</select></div></div><button data-a="addemp" style="width:100%;margin-top:12px">إضافة وتفعيل</button></div>';
-  h+='<div class="card"><h2>الموظفون ('+(data||[]).length+")</h2>"+(data||[]).map(p=>'<div class="it"><b>'+esc(p.full_name)+"</b>"+sel(p.id,"role",roleOpt(p.role))+'<div class="row">'+sel(p.id,"branch_id",opt(C.b,p.branch_id,"بدون فرع"))+sel(p.id,"shift_id",opt(C.s,p.shift_id,"بدون وردية"))+"</div>"+sel(p.id,"active",'<option value="true"'+(p.active?" selected":"")+'>مفعل</option><option value="false"'+(p.active?"":" selected")+">معطل</option>")+(p.role!="gm"?'<div class="row" style="align-items:center;margin-top:6px"><small>'+(p.device_id?"مرتبط بجهاز":"غير مرتبط بجهاز")+"</small>"+(p.device_id?'<button class="sec" data-a="rdev" data-id="'+p.id+'">فك ارتباط الجهاز</button>':"")+"</div>":"")+"</div>").join("")+"</div>";
+  h+='<div class="card"><h2>الموظفون ('+list.length+')</h2><input id="eq" placeholder="بحث بالاسم" value="'+esc(EM.q)+'"><select id="er2" style="margin:6px 0 10px"><option value="">كل الأدوار</option>'+Object.keys(ROLES).map(k=>'<option value="'+k+'"'+(k==EM.r?" selected":"")+'>'+ROLES[k]+'</option>').join("")+"</select>"+list.map(p=>'<div class="it"><b>'+esc(p.full_name)+"</b>"+sel(p.id,"role",roleOpt(p.role))+'<div class="row">'+sel(p.id,"branch_id",opt(C.b,p.branch_id,"بدون فرع"))+sel(p.id,"shift_id",opt(C.s,p.shift_id,"بدون وردية"))+"</div>"+sel(p.id,"active",'<option value="true"'+(p.active?" selected":"")+'>مفعل</option><option value="false"'+(p.active?"":" selected")+">معطل</option>")+(p.role!="gm"?sel(p.id,"field_ok",'<option value="true"'+(p.field_ok?" selected":"")+'>دوام ميداني: مسموح (يسجل من أي مكان)</option><option value="false"'+(p.field_ok?"":" selected")+'>دوام ميداني: غير مسموح</option>')+'<div class="row" style="align-items:center;margin-top:6px"><small>'+(p.device_id?"مرتبط بجهاز":"غير مرتبط بجهاز")+"</small>"+(p.device_id?'<button class="sec" data-a="rdev" data-id="'+p.id+'">فك ارتباط الجهاز</button>':"")+"</div>":"")+"</div>").join("")+"</div>";
   return h
 }
 let BE={t:null,id:null};
@@ -251,7 +262,7 @@ async function vMap(){
   const {data,error}=await sb.rpc("courier_map");
   if(error)return'<div class="card"><p class="msg">'+esc(error.message)+"</p></div>";
   MD=data||[];
-  return'<div class="card"><h2>خريطة المناديب ('+MD.length+' على الوردية)</h2><div id="map" style="height:58vh;border-radius:12px;z-index:0"></div><p class="msg">الأخضر نشط الآن، والرمادي لم يرسل موقعه من أكثر من 5 دقائق. الدوائر الذهبية هي الفروع ونطاق الحضور. التحديث لحظي.</p><button class="sec" data-a="mref">تحديث القائمة</button></div><div class="card"><h2>المناديب</h2><div id="mlist"></div></div>'
+  return'<div class="card"><h2>خريطة المناديب ('+MD.length+' على الوردية | '+MD.filter(c=>c.c_lat!=null&&Date.now()-new Date(c.c_upd)<3e5).length+' متصل)</h2><div id="map" style="height:58vh;border-radius:12px;z-index:0"></div><p class="msg">الأخضر نشط الآن، والرمادي لم يرسل موقعه من أكثر من 5 دقائق. الدوائر الذهبية هي الفروع ونطاق الحضور. التحديث لحظي.</p><button class="sec" data-a="mref">تحديث القائمة</button></div><div class="card"><h2>المناديب</h2><div id="mlist"></div></div>'
 }
 function putMarker(c){
   if(!MP||c.c_lat==null)return;
@@ -419,42 +430,70 @@ async function vOrdCour(){
   };
   return(act.length?act.map(card).join(""):'<div class="card"><p class="msg">لا توجد مهام حالياً. سيصلك إشعار صوتي عند إسناد طلب.</p></div>')+(done.length?'<div class="card"><h2>آخر الطلبات المنتهية</h2>'+done.map(r=>'<div class="it">#'+r.id+" "+esc(r.customer_name)+' <span class="tag">'+ST[r.status]+"</span>"+(r.result_note?"<small><br>"+esc(r.result_note)+"</small>":"")+"</div>").join("")+"</div>":"")
 }
-let R={from:"",to:"",b:"",rows:null};
+let R={type:"att",from:"",to:"",b:"",e:"",out:null};
+const RT={att:"الحضور والانصراف",hrs:"ساعات العمل والتأخير",ot:"الأوفر تايم",perf:"أداء المناديب",ord:"الطلبات",comm:"عمولات المناديب",coll:"التحصيل والتوريد",req:"طلبات العملاء",cmp:"مقارنة الفروع"};
 async function vRep(){
   if(!R.from){const t=new Date().toLocaleDateString("sv-SE",{timeZone:"Africa/Cairo"});R.from=t.slice(0,8)+"01";R.to=t}
-  const rows=R.rows;
-  let h='<div class="card"><h2>تقارير الحضور</h2><div class="row"><div><label>من</label><input type="date" id="rf" value="'+R.from+'"></div><div><label>إلى</label><input type="date" id="rt" value="'+R.to+'"></div></div><label>الفرع</label><select id="rb">'+opt(C.b,R.b,"كل الفروع")+'</select><div class="row" style="margin-top:10px"><button data-a="rep">عرض التقرير</button><button class="sec" data-a="xls"'+(rows&&rows.length?"":" disabled")+'>تصدير Excel</button></div></div>';
-  if(rows){
-    const m={};rows.forEach(r=>{const x=m[r.n]=m[r.n]||{d:0,w:0,l:0,c:0,o:0};x.d++;x.w+=r.w;x.l+=r.l;if(r.l)x.c++;x.o+=r.ot});
-    const ks=Object.keys(m);
-    h+='<div class="card"><h2>ملخص لكل موظف</h2><div style="overflow-x:auto"><table><tr><th>الموظف</th><th>أيام</th><th>ساعات الحضور</th><th>التأخير</th><th>الساعات الإضافية</th></tr>'+(ks.length?ks.map(k=>{const x=m[k];return"<tr><td>"+esc(k)+"</td><td>"+x.d+"</td><td>"+fm(x.w)+'</td><td class="late">'+fm(x.l)+" ("+x.c+')</td><td class="ot">'+fm(x.o)+"</td></tr>"}).join(""):'<tr><td colspan="5">لا توجد بيانات في هذه الفترة.</td></tr>')+"</table></div></div>";
-    h+='<div class="card"><h2>التفاصيل اليومية ('+rows.length+')</h2><div style="overflow-x:auto"><table><tr><th>التاريخ</th><th>الموظف</th><th>الفرع</th><th>حضور</th><th>انصراف</th><th>ساعات الحضور</th><th>تأخير</th><th>ساعات إضافية</th></tr>'+rows.map(r=>"<tr><td>"+r.d+"</td><td>"+esc(r.n)+"</td><td>"+esc(r.b)+"</td><td>"+hm(r.i)+"</td><td>"+(r.o?hm(r.o):"لم ينصرف")+"</td><td>"+fm(r.w)+'</td><td class="late">'+(r.l?fm(r.l):"-")+'</td><td class="ot">'+(r.ot?fm(r.ot):"-")+"</td></tr>").join("")+"</table></div></div>"
-  }
-  return h
+  const pr=(await sb.from("profiles").select("id,full_name").eq("active",true).order("full_name")).data||[];
+  let h='<div class="card noprint"><h2>التقارير</h2><label>نوع التقرير</label><select id="rtp">'+Object.keys(RT).map(k=>'<option value="'+k+'"'+(k==R.type?" selected":"")+">"+RT[k]+"</option>").join("")+'</select><label>الموظف</label><select id="re"><option value="">كل الموظفين</option>'+pr.map(p=>'<option value="'+p.id+'"'+(p.id==R.e?" selected":"")+">"+esc(p.full_name)+"</option>").join("")+'</select><div class="row"><div><label>من</label><input type="date" id="rf" value="'+R.from+'"></div><div><label>إلى</label><input type="date" id="rt" value="'+R.to+'"></div></div><label>الفرع</label><select id="rb">'+opt(C.b,R.b,"كل الفروع")+'</select><div class="row" style="margin-top:10px"><button data-a="rep">عرض التقرير</button><button class="sec" data-a="xls"'+(R.out&&R.out.x.length?"":" disabled")+'>Excel</button><button class="sec" data-a="prt">طباعة</button></div></div>';
+  if(!R.out)return h;
+  const o=R.out,cols=o.x.length?Object.keys(o.x[0]):[];
+  h+='<div class="card"><h2>'+RT[R.type]+'</h2><p class="msg">من '+R.from+" إلى "+R.to+'</p></div><div class="grid">'+o.k.map(k=>'<div class="kc" style="cursor:default"><span>'+k[0]+"</span><b>"+k[1]+"</b></div>").join("")+"</div>";
+  return h+'<div class="card"><div style="overflow-x:auto"><table><tr>'+cols.map(c=>"<th>"+c+"</th>").join("")+"</tr>"+(o.x.length?o.x.slice(0,300).map(r=>"<tr>"+cols.map(c=>"<td>"+esc(r[c])+"</td>").join("")+"</tr>").join(""):'<tr><td colspan="9">لا توجد بيانات في هذه الفترة.</td></tr>')+"</table></div>"+(o.x.length>300?'<p class="msg">يعرض أول 300 سطر، والتصدير يشمل الكل.</p>':"")+(o.note?'<p class="msg">'+o.note+"</p>":"")+"</div>"
 }
 async function runRep(){
-  R.from=val("rf");R.to=val("rt");R.b=val("rb");
+  R.type=$("rtp").value;R.from=val("rf");R.to=val("rt");R.b=val("rb");R.e=val("re");
   if(!R.from||!R.to)return toast("اختر تاريخ البداية والنهاية");
-  let q=sb.from("attendance").select("*,profiles!inner(full_name,branch_id)").gte("work_date",R.from).lte("work_date",R.to).order("work_date").order("check_in").limit(5000);
-  if(R.b)q=q.eq("profiles.branch_id",R.b);
-  const {data,error}=await q;
-  if(error)return toast(error.message);
-  R.rows=(data||[]).map(r=>({d:r.work_date,n:r.profiles.full_name,b:(C.b.find(x=>x.id==r.profiles.branch_id)||{}).name||"-",i:r.check_in,o:r.check_out,w:r.work_min,l:r.late_min,ot:r.overtime_min}));
-  render()
+  const T=R.type,cd=x=>new Date(x).toLocaleDateString("sv-SE",{timeZone:"Africa/Cairo"}),inR=x=>{const d=cd(x);return d>=R.from&&d<=R.to};
+  const pm={};((await sb.from("profiles").select("id,full_name,role,branch_id")).data||[]).forEach(p=>pm[p.id]=p);
+  const nm=id=>(pm[id]||{}).full_name||"-",okU=id=>{const p=pm[id];return !!p&&(!R.b||p.branch_id==R.b)&&(!R.e||p.id==R.e)};
+  const sum=(a,f)=>a.reduce((t,y)=>t+(+f(y)||0),0),grp=(a,f)=>{const m={};a.forEach(y=>{(m[f(y)]=m[f(y)]||[]).push(y)});return m};
+  let x=[],k=[],note="",A=[],O=[];
+  if(["att","hrs","ot","cmp"].indexOf(T)>-1){const {data,error}=await sb.from("attendance").select("*").gte("work_date",R.from).lte("work_date",R.to).limit(5000);if(error)return toast(error.message);A=(data||[]).filter(a=>okU(a.user_id))}
+  if(["ord","perf","coll","cmp"].indexOf(T)>-1){const {data,error}=await sb.from("orders").select("*").order("id",{ascending:false}).limit(3000);if(error)return toast(error.message);O=(data||[]).filter(o=>inR(o.created_at)&&(!R.b||o.branch_id==R.b)&&(!R.e||o.courier_id==R.e))}
+  const DL=O.filter(o=>o.status=="delivered");
+  if(T=="att"){
+    x=A.sort((a,b)=>a.work_date<b.work_date?1:-1).map(a=>({"التاريخ":a.work_date,"الموظف":nm(a.user_id),"الفرع":bn(pm[a.user_id].branch_id),"حضور":hm(a.check_in),"انصراف":a.check_out?hm(a.check_out):"لم ينصرف","ساعات":hr(a.work_min),"تأخير (دقيقة)":a.late_min,"أوفر تايم (ساعة)":hr(a.overtime_min),"ميداني":a.field?"نعم":"-"}));
+    k=[["سجلات الحضور",A.length],["إجمالي ساعات العمل",fm(sum(A,a=>a.work_min))],["ساعات الأوفر تايم",fm(sum(A,a=>a.overtime_min))],["إجمالي التأخير",fm(sum(A,a=>a.late_min))]]
+  }else if(T=="hrs"||T=="ot"){
+    const g=grp(A,a=>a.user_id);
+    x=Object.keys(g).map(u=>{const r=g[u];return T=="hrs"?{"الموظف":nm(u),"أيام الحضور":r.length,"ساعات العمل":hr(sum(r,a=>a.work_min)),"دقائق التأخير":sum(r,a=>a.late_min),"أيام التأخير":r.filter(a=>a.late_min>0).length}:{"الموظف":nm(u),"أيام بأوفر تايم":r.filter(a=>a.overtime_min>0).length,"ساعات الأوفر تايم":hr(sum(r,a=>a.overtime_min))}}).filter(r=>T=="hrs"||r["ساعات الأوفر تايم"]>0);
+    k=T=="hrs"?[["عدد الموظفين",x.length],["إجمالي ساعات العمل",fm(sum(A,a=>a.work_min))],["إجمالي التأخير",fm(sum(A,a=>a.late_min))],["أيام التأخير",A.filter(a=>a.late_min>0).length]]:[["ساعات الأوفر تايم",fm(sum(A,a=>a.overtime_min))],["موظفون بأوفر تايم",x.length],["أيام بأوفر تايم",A.filter(a=>a.overtime_min>0).length]]
+  }else if(T=="perf"){
+    const g=grp(O.filter(o=>o.courier_id),o=>o.courier_id);
+    x=Object.keys(g).map(u=>{const r=g[u],d=r.filter(o=>o.status=="delivered").length;return{"المندوب":nm(u),"إجمالي الطلبات":r.length,"تم التوصيل":d,"رفض الاستلام":r.filter(o=>o.status=="refused").length,"مؤجل":r.filter(o=>o.status=="postponed").length,"ملغي":r.filter(o=>o.status=="cancelled").length,"نسبة النجاح %":Math.round(d/r.length*100)}});
+    k=[["إجمالي الطلبات",O.length],["تم التوصيل",DL.length],["رفض / مؤجل",O.filter(o=>o.status=="refused"||o.status=="postponed").length],["نسبة النجاح",(O.length?Math.round(DL.length/O.length*100):0)+"%"]]
+  }else if(T=="ord"){
+    x=O.map(o=>({"رقم":o.id,"التاريخ":cd(o.created_at),"العميل":o.customer_name,"الموبايل":o.phone,"المندوب":o.courier_id?nm(o.courier_id):"-","الحالة":ST[o.status],"قيمة الطلب":n2(o.amount),"رسوم التوصيل":n2(o.delivery_fee),"المطلوب تحصيله":due(o)}));
+    k=[["عدد الطلبات",O.length],["تم التوصيل",DL.length],["قيد التنفيذ",O.filter(o=>["new","assigned","accepted","picked_up","on_the_way","postponed"].indexOf(o.status)>-1).length],["إجمالي التحصيل",n2(sum(DL,o=>due(o)))]]
+  }else if(T=="coll"){
+    const D=DL.filter(o=>o.courier_id),g=grp(D,o=>o.courier_id),cash=a=>sum(a.filter(o=>o.payment_method=="cash"),o=>due(o));
+    x=Object.keys(g).map(u=>{const r=g[u];return{"المندوب":nm(u),"طلبات مسلّمة":r.length,"تحصيل نقدي":n2(cash(r)),"تحصيل فيزا/محفظة":n2(sum(r,o=>due(o))-cash(r)),"الإجمالي":n2(sum(r,o=>due(o)))}});
+    k=[["إجمالي التحصيل",n2(sum(D,o=>due(o)))],["نقدي",n2(cash(D))],["فيزا / محفظة",n2(sum(D,o=>due(o))-cash(D))],["طلبات مسلّمة",D.length]];
+    note="التقرير يعرض المبالغ المطلوب تحصيلها من الطلبات المسلّمة. تسجيل التوريد الفعلي للصيدلية غير مفعّل بعد."
+  }else if(T=="comm"){
+    const {data,error}=await sb.rpc("payroll_report",{p_month:R.from.slice(0,8)+"01",p_user:null});if(error)return toast(error.message);
+    x=(data||[]).filter(r=>(!R.e||r.r_uid==R.e)&&(!R.b||r.r_branch==R.b)&&(+r.r_delivered>0||+r.r_comm_rate>0)).map(r=>({"المندوب":r.r_name,"طلبات مسلّمة":+r.r_delivered,"عمولة الطلب":n2(r.r_comm_rate),"إجمالي العمولة":n2(r.r_comm)}));
+    k=[["إجمالي العمولات",n2(sum(x,r=>r["إجمالي العمولة"]))],["عدد المناديب",x.length],["طلبات مسلّمة",sum(x,r=>r["طلبات مسلّمة"])]];
+    note="العمولات تُحسب لشهر تاريخ البداية ("+R.from.slice(0,7)+")."
+  }else if(T=="req"){
+    const {data,error}=await sb.from("customer_requests").select("*").order("id",{ascending:false}).limit(3000);if(error)return toast(error.message);
+    const Q=(data||[]).filter(r=>inR(r.created_at)&&(!R.b||r.branch_id==R.b));
+    x=Q.map(r=>({"رقم":r.id,"التاريخ":cd(r.created_at),"العميل":r.customer_name,"الموبايل":r.phone,"الفرع":bn(r.branch_id),"الحالة":RS[r.status]}));
+    k=[["إجمالي الطلبات",Q.length],["جاري الطلب",Q.filter(r=>r.status=="in_progress").length],["تم الطلب / وصل للفرع",Q.filter(r=>r.status=="ordered"||r.status=="arrived").length],["تم التسليم",Q.filter(r=>r.status=="delivered").length]]
+  }else{
+    x=C.b.filter(b=>!R.b||b.id==R.b).map(b=>{const a=A.filter(r=>(pm[r.user_id]||{}).branch_id==b.id),o=O.filter(r=>r.branch_id==b.id);return{"الفرع":b.name,"سجلات الحضور":a.length,"ساعات العمل":hr(sum(a,r=>r.work_min)),"دقائق التأخير":sum(a,r=>r.late_min),"ساعات الأوفر تايم":hr(sum(a,r=>r.overtime_min)),"الطلبات":o.length,"تم التوصيل":o.filter(r=>r.status=="delivered").length}});
+    k=[["عدد الفروع",x.length],["إجمالي ساعات العمل",fm(sum(A,r=>r.work_min))],["إجمالي الطلبات",O.length],["تم التوصيل",DL.length]]
+  }
+  R.out={x,k,note};render()
 }
 function exportXls(){
-  const rows=R.rows||[],hh=m=>Math.round(m/60*100)/100;
-  const tm=x=>x?new Date(x).toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit",timeZone:"Africa/Cairo"}):"";
-  const det=rows.map(r=>({"التاريخ":r.d,"الموظف":r.n,"الفرع":r.b,"وقت الحضور":tm(r.i),"وقت الانصراف":r.o?tm(r.o):"لم ينصرف","ساعات الحضور":hh(r.w),"دقائق التأخير":r.l,"الساعات الإضافية":hh(r.ot)}));
-  const m={};
-  rows.forEach(r=>{const x=m[r.n]=m[r.n]||{"الموظف":r.n,"أيام الحضور":0,"ساعات الحضور":0,"دقائق التأخير":0,"الساعات الإضافية":0};x["أيام الحضور"]++;x["ساعات الحضور"]+=r.w/60;x["دقائق التأخير"]+=r.l;x["الساعات الإضافية"]+=r.ot/60});
-  const sum=Object.keys(m).map(k=>{const x=m[k];x["ساعات الحضور"]=Math.round(x["ساعات الحضور"]*100)/100;x["الساعات الإضافية"]=Math.round(x["الساعات الإضافية"]*100)/100;return x});
-  const wb=XLSX.utils.book_new();
-  wb.Workbook={Views:[{RTL:true}]};
-  XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(sum),"الملخص");
-  XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(det),"التفاصيل");
-  XLSX.writeFile(wb,"attendance-"+R.from+"_"+R.to+".xlsx")
+  const x=(R.out&&R.out.x)||[];if(!x.length)return;
+  const wb=XLSX.utils.book_new();wb.Workbook={Views:[{RTL:true}]};
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(x),RT[R.type].slice(0,30));
+  XLSX.writeFile(wb,"report-"+R.type+"-"+R.from+"_"+R.to+".xlsx")
 }
+
 
 document.addEventListener("click",async ev=>{
   const t=ev.target.closest("[data-t],[data-a],[data-del]");if(!t)return;
@@ -466,6 +505,7 @@ document.addEventListener("click",async ev=>{
   else if(a=="in"||a=="out")punch(a);
   else if(a=="rep")runRep();
   else if(a=="xls")exportXls();
+  else if(a=="prt")window.print();
   else if(a=="beep")beep();
   else if(a=="atab"){AT.t=t.dataset.v;render()}
   else if(a=="geo"){GEO=null;if($("geo"))$("geo").innerHTML=geoHtml();refreshGeo()}
@@ -542,6 +582,7 @@ document.addEventListener("click",async ev=>{
 document.addEventListener("change",async ev=>{
   const e=ev.target;
   if(e.id=="aed_d"||e.id=="aed_b"){AE.d=$("aed_d").value||AE.d;AE.b=$("aed_b").value;return render()}
+  if(e.id=="eq"||e.id=="er2"){EM.q=$("eq").value.trim();EM.r=$("er2").value;return render()}
   if(e.id=="atd"||e.id=="atb"||e.id=="atf"){AT.d=$("atd").value||AT.d;AT.b=$("atb").value;AT.f=$("atf").value;return render()}
   if(e.id=="pm"){PY.m=e.value||PY.m;PY.id=null;return render()}
   if(e.id=="qs"||e.id=="qf"){RQ.q=$("qs").value.trim();RQ.f=$("qf").value;return render()}
@@ -549,7 +590,7 @@ document.addEventListener("change",async ev=>{
   if(e.dataset.p){const [r,pm]=e.dataset.p.split(":");const {error}=await(e.checked?sb.from("role_permissions").upsert({role:r,permission:pm}):sb.from("role_permissions").delete().eq("role",r).eq("permission",pm));toast(error?error.message:"تم الحفظ");if(error)render();return}
   if(e.id=="oq"||e.id=="of"){O.q=$("oq").value.trim();O.f=$("of").value;return render()}if(e.id=="hd"||e.id=="hb"){H.date=$("hd").value||H.date;H.b=$("hb").value;return render()}if(!e.dataset.f)return;
   if(e.dataset.id==me.id&&(e.dataset.f=="role"||e.dataset.f=="active")){toast("لا يمكنك تغيير دورك أو تعطيل حسابك");return render()}
-  let v=e.value;if(e.dataset.f=="active")v=v=="true";else if(e.dataset.f!="role")v=+v||null;
+  let v=e.value;if(e.dataset.f=="active"||e.dataset.f=="field_ok")v=v=="true";else if(e.dataset.f!="role")v=+v||null;
   const {error}=await sb.from("profiles").update({[e.dataset.f]:v}).eq("id",e.dataset.id);
   if(error)toast(error.message);else toast("تم الحفظ");
   if(e.dataset.id==me.id)boot()
