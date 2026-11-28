@@ -54,6 +54,7 @@ nav button{flex:1;min-width:70px;background:transparent;color:var(--mu);font-siz
 <body>
 <div id="toast"></div>
 <header><div style="display:flex;align-items:center;gap:10px"><button class="sec" id="mb" data-a="menu" style="display:none;padding:6px 11px;font-size:18px">☰</button><img id="hl" class="lg" alt=""><div><h1>صيدليات دراهم</h1><small id="who"></small></div></div><button class="sec" id="lo" data-a="logout" style="display:none">خروج</button></header>
+<div id="bkbar" style="display:none;padding:8px 16px 0;max-width:640px;margin:auto"><button class="sec" data-a="back">→ رجوع</button></div>
 <main id="v"></main>
 <div id="ov" data-a="menu"></div><aside id="dr"></aside>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
@@ -69,7 +70,7 @@ const DID=(()=>{try{let d=localStorage.getItem("did");if(!d){d=(window.crypto&&c
 const URL_="https://tzivcmkzkgpzkhpnudbp.supabase.co",KEY="sb_publishable_tRq9m7SyJQW3vVCfYVQ1Jw_RawfN87s";
 const sb=supabase.createClient(URL_,KEY);
 const ROLES={gm:"مدير عام",courier:"مندوب توصيل",supervisor:"مشرف مناديب",pharmacist:"صيدلي",assistant:"مساعد صيدلي",branch_manager:"مدير فرع",admin:"إداري",accountant:"محاسب",coder:"تكويد"};
-const TABS=[["home","الرئيسية",null],["att","الحضور","attendance"],["rep","التقارير","reports"],["ord","الطلبات","orders"],["map","الخريطة","map"],["req","طلبات العملاء","requests"],["aed","تعديل الحضور","attendance_edit"],["pay","المستحقات والرواتب","payroll"],["perm","الصلاحيات",null],["setup","تهيئة النظام","branches"],["nt","الإشعارات",null],["emp","الموظفون","employees"],["br","الفروع","branches"],["sh","الورديات","shifts"]];
+const TABS=[["home","الرئيسية",null],["att","الحضور","attendance"],["rep","التقارير","reports"],["ord","الطلبات","orders"],["map","الخريطة","map"],["req","طلبات العملاء","requests"],["aed","تعديل الحضور","attendance_edit"],["pay","المستحقات والرواتب","payroll"],["perm","الصلاحيات",null],["setup","تهيئة النظام","branches"],["nt","الإشعارات",null],["me","حسابي",null],["bk","النسخ الاحتياطي",null],["emp","الموظفون","employees"],["br","الفروع","branches"],["sh","الورديات","shifts"]];
 let me=null,perms=[],tab="att",C={b:[],s:[]},unread=0,ch=null,AC=null;
 const $=i=>document.getElementById(i);
 const esc=s=>String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
@@ -98,11 +99,11 @@ async function loadRef(){
 async function render(){
   $("lo").style.display=me?"block":"none";$("mb").style.display=me?"block":"none";$("mb").textContent=unread?"☰ ("+unread+")":"☰";
   $("who").textContent=me?me.full_name+" - "+ROLES[me.role]:"";
-  if(!me){$("v").innerHTML=vLogin();$("dr").innerHTML="";document.body.classList.remove("mo");return}
-  const tabs=TABS.filter(t=>t[0]=="att"||t[0]=="nt"||t[0]=="pay"||(t[0]=="home"?(can("reports")||can("orders")||can("employees")):can(t[2]))||(t[0]=="ord"&&me.role=="courier"));
+  if(!me){$("bkbar").style.display="none";$("v").innerHTML=vLogin();$("dr").innerHTML="";document.body.classList.remove("mo");return}
+  const tabs=TABS.filter(t=>t[0]=="att"||t[0]=="nt"||t[0]=="me"||t[0]=="pay"||(t[0]=="home"?(can("reports")||can("orders")||can("employees")):can(t[2]))||(t[0]=="ord"&&me.role=="courier"));
   if(!tabs.some(t=>t[0]==tab))tab="att";
   $("dr").innerHTML='<div class="dh"><b>'+esc(me.full_name)+"</b><small>"+ROLES[me.role]+"</small></div>"+tabs.map(t=>'<button data-t="'+t[0]+'" class="'+(t[0]==tab?"on":"")+'">'+(t[0]=="pay"&&!can("payroll")?"مستحقاتي":t[1])+(t[0]=="nt"&&unread?" ("+unread+")":"")+"</button>").join("")+(DI?'<button class="sec" data-a="install" style="margin-top:12px">تثبيت التطبيق على الجهاز</button>':"");
-  $("v").innerHTML=await {aed:vAed,setup:vSetup,pay:vPay,req:vReq,perm:vPerm,map:vMap,home:vHome,att:vAtt,ord:vOrd,nt:vNt,rep:vRep,emp:vEmp,br:vBr,sh:vSh}[tab]();if(tab=="map")initMap();else killMap();if(tab=="att"&&$("geo")&&(!GEO||Date.now()-GEO.ts>45000))refreshGeo()
+  $("v").innerHTML=await {me:vMe,bk:vBk,aed:vAed,setup:vSetup,pay:vPay,req:vReq,perm:vPerm,map:vMap,home:vHome,att:vAtt,ord:vOrd,nt:vNt,rep:vRep,emp:vEmp,br:vBr,sh:vSh}[tab]();if(tab=="map")initMap();else killMap();if(tab=="att"&&$("geo")&&(!GEO||Date.now()-GEO.ts>45000))refreshGeo();navTrack()
 }
 function vLogin(){return'<div style="text-align:center;margin:6px 0 14px"><img alt="Darahem Pharmacy" src="'+LOGO+'" style="width:190px;height:190px;border-radius:24px"></div><div class="card"><h2>تسجيل الدخول</h2><label>اسم المستخدم أو الإيميل</label><input id="lu" autocapitalize="off" autocomplete="username"><label>كلمة السر</label><input id="lp" type="password" autocomplete="current-password"><button data-a="login" style="width:100%;margin-top:12px">دخول</button></div>'}
 
@@ -156,16 +157,46 @@ async function vAtTeam(){
   }).join(""):'<div class="card"><p class="msg">لا توجد سجلات.</p></div>')
 }
 function punch(t){
-  if(!navigator.geolocation)return toast("الجهاز لا يدعم تحديد الموقع");
-  $("loc").textContent="جاري تحديد موقعك...";
-  navigator.geolocation.getCurrentPosition(async p=>{
-    const n=$("pnote"),{data,error}=await sb.rpc(t=="in"?"punch_in":"punch_out",{p_lat:p.coords.latitude,p_lng:p.coords.longitude,p_device:DID,p_acc:p.coords.accuracy,p_note:n&&n.value.trim()?n.value.trim():null});
+  const send=async(lat,lng,acc)=>{
+    const n=$("pnote"),{data,error}=await sb.rpc(t=="in"?"punch_in":"punch_out",{p_lat:lat,p_lng:lng,p_device:DID,p_acc:acc,p_note:n&&n.value.trim()?n.value.trim():null});
     if(error)toast(error.message);
     else toast(t=="in"?"تم تسجيل الحضور"+(data.field?" (ميداني للمراجعة)":"")+(data.late_min?" (تأخير "+fm(data.late_min)+")":""):"تم تسجيل الانصراف"+(data.overtime_min?" (أوفر تايم "+fm(data.overtime_min)+")":""));
     render()
-  },()=>{$("loc").textContent="";toast("تعذر تحديد موقعك. فعّل الموقع وأعطِ التطبيق الإذن")},{enableHighAccuracy:true,timeout:15000,maximumAge:0})
+  };
+  if(!navigator.geolocation){if(me.role=="gm")return send(0,0,null);return toast("الجهاز لا يدعم تحديد الموقع")}
+  $("loc").textContent="جاري تحديد موقعك...";
+  navigator.geolocation.getCurrentPosition(p=>send(p.coords.latitude,p.coords.longitude,p.coords.accuracy),()=>{$("loc").textContent="";if(me.role=="gm")send(0,0,null);else toast("تعذر تحديد موقعك. فعّل الموقع وأعطِ التطبيق الإذن")},{enableHighAccuracy:true,timeout:15000,maximumAge:0})
 }
 
+let EV={id:null,form:false},NAV={stack:[],cur:null,skip:false};
+function snap(){return JSON.stringify([tab,O.id,O.form,RQ.id,RQ.form,PY.id,H.detail,AT.t,BE.t,BE.id,EV.id,EV.form])}
+function restoreSnap(k){const a=JSON.parse(k);tab=a[0];O.id=a[1];O.form=a[2];RQ.id=a[3];RQ.form=a[4];PY.id=a[5];H.detail=a[6];AT.t=a[7];BE.t=a[8];BE.id=a[9];EV.id=a[10];EV.form=a[11]}
+function navTrack(){
+  const k=snap();
+  if(NAV.skip){NAV.skip=false;NAV.cur=k}
+  else if(NAV.cur===null)NAV.cur=k;
+  else if(k!==NAV.cur){NAV.stack.push(NAV.cur);NAV.cur=k;history.pushState({n:NAV.stack.length},"")}
+  const b=$("bkbar");if(b)b.style.display=NAV.stack.length?"block":"none"
+}
+function goBack(){if(!NAV.stack.length)return;NAV.cur=NAV.stack.pop();restoreSnap(NAV.cur);NAV.skip=true;render()}
+window.addEventListener("popstate",()=>{if(me)goBack()});
+async function vMe(){
+  return'<div class="card"><h2>حسابي</h2><p class="msg">'+esc(me.full_name)+" | "+ROLES[me.role]+" | "+esc(bn(me.branch_id))+'</p></div><div class="card"><h2>تغيير كلمة السر</h2><label>كلمة السر الجديدة</label><input id="mp1" type="password" autocomplete="new-password"><label>تأكيد كلمة السر</label><input id="mp2" type="password" autocomplete="new-password"><button data-a="mpw" style="width:100%;margin-top:10px">حفظ كلمة السر</button><p class="msg">6 أحرف على الأقل. لو نسيتها اطلب من المدير العام يعيّنها لك.</p></div><button class="sec" data-a="logout" style="width:100%">تسجيل الخروج</button>'
+}
+const BT=[["branches","id"],["shifts","id"],["profiles","id"],["role_permissions","role"],["pay_settings","user_id"],["pay_adjustments","id"],["pay_paid","user_id"],["orders","id"],["order_events","id"],["attendance","id"],["customer_requests","id"],["customer_request_items","id"],["customer_request_events","id"]];
+async function fetchAll(t,o){const out=[];for(let i=0;;i+=1000){const {data,error}=await sb.from(t).select("*").order(o).range(i,i+999);if(error)throw new Error(t+": "+error.message);out.push(...data);if(data.length<1000)break}return out}
+async function makeBackup(xls){
+  const T={};for(const [t,o] of BT)T[t]=await fetchAll(t,o);
+  const d=new Date().toISOString().slice(0,10);
+  if(xls){const wb=XLSX.utils.book_new();wb.Workbook={Views:[{RTL:true}]};BT.forEach(([t])=>XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(T[t]),t.slice(0,31)));XLSX.writeFile(wb,"drahem-data-"+d+".xlsx")}
+  else{const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([JSON.stringify({app:"drahem",version:1,created_at:new Date().toISOString(),tables:T})],{type:"application/json"}));a.download="drahem-backup-"+d+".json";document.body.appendChild(a);a.click();a.remove()}
+  try{localStorage.setItem("lastbk",new Date().toISOString())}catch(e){}
+  return BT.map(([t])=>t+": "+T[t].length).join(" | ")
+}
+async function vBk(){
+  let lb="";try{lb=localStorage.getItem("lastbk")||""}catch(e){}
+  return'<div class="card"><h2>النسخ الاحتياطي</h2><p class="msg">آخر نسخة من هذا الجهاز: '+(lb?dt(lb):"لا توجد")+'</p><button data-a="bkmake" style="width:100%;margin-bottom:8px">إنشاء نسخة احتياطية (ملف للاستعادة)</button><button class="sec" data-a="bkxls" style="width:100%">تصدير كل البيانات Excel (للاطلاع)</button><p class="msg" id="bkmsg"></p></div><div class="card"><h2>رفع نسخة واستعادتها</h2><p class="msg">الاستعادة تضيف السجلات الناقصة فقط، ولا تعدّل ولا تمسح الموجود. حسابات الدخول نفسها لا تُستعاد.</p><input type="file" id="bkfile" accept=".json,application/json"><button data-a="bkrestore" style="width:100%;margin-top:10px">رفع واستعادة</button><div id="bkres" class="msg" style="margin-top:8px"></div></div>'
+}
 let EM={q:"",r:""};
 async function vSetup(){
   const {data}=await sb.from("profiles").select("id,branch_id,shift_id").eq("active",true);
@@ -176,15 +207,26 @@ async function vSetup(){
 }
 
 async function vEmp(){
-  const {data}=await sb.from("profiles").select("*").order("full_name");
-  const list=(data||[]).filter(p=>(!EM.q||p.full_name.toLowerCase().indexOf(EM.q.toLowerCase())>-1)&&(!EM.r||p.role==EM.r));
-  const sel=(id,f,html)=>'<select data-id="'+id+'" data-f="'+f+'">'+html+"</select>";
-  let h='<div class="card"><h2>إضافة موظف</h2><label>الاسم</label><input id="ef"><label>اسم المستخدم (إنجليزي بدون مسافات)</label><input id="en" autocapitalize="off"><label>كلمة السر (6 أحرف على الأقل)</label><input id="ep" type="text" autocomplete="off"><label>الدور</label><select id="er">'+roleOpt("assistant")+'</select><div class="row"><div><label>الفرع</label><select id="eb">'+opt(C.b,"","بدون")+'</select></div><div><label>الوردية</label><select id="es">'+opt(C.s,"","بدون")+'</select></div></div><button data-a="addemp" style="width:100%;margin-top:12px">إضافة وتفعيل</button></div>';
-  h+='<div class="card"><h2>الموظفون ('+list.length+')</h2><input id="eq" placeholder="بحث بالاسم" value="'+esc(EM.q)+'"><select id="er2" style="margin:6px 0 10px"><option value="">كل الأدوار</option>'+Object.keys(ROLES).map(k=>'<option value="'+k+'"'+(k==EM.r?" selected":"")+'>'+ROLES[k]+'</option>').join("")+"</select>"+list.map(p=>'<div class="it"><b>'+esc(p.full_name)+"</b>"+sel(p.id,"role",roleOpt(p.role))+'<div class="row">'+sel(p.id,"branch_id",opt(C.b,p.branch_id,"بدون فرع"))+sel(p.id,"shift_id",opt(C.s,p.shift_id,"بدون وردية"))+"</div>"+sel(p.id,"active",'<option value="true"'+(p.active?" selected":"")+'>مفعل</option><option value="false"'+(p.active?"":" selected")+">معطل</option>")+(p.role!="gm"?sel(p.id,"field_ok",'<option value="true"'+(p.field_ok?" selected":"")+'>دوام ميداني: مسموح (يسجل من أي مكان)</option><option value="false"'+(p.field_ok?"":" selected")+'>دوام ميداني: غير مسموح</option>')+'<div class="row" style="align-items:center;margin-top:6px"><small>'+(p.device_id?"مرتبط بجهاز":"غير مرتبط بجهاز")+"</small>"+(p.device_id?'<button class="sec" data-a="rdev" data-id="'+p.id+'">فك ارتباط الجهاز</button>':"")+"</div>":"")+"</div>").join("")+"</div>";
+  const {data}=await sb.from("profiles").select("*").order("full_name"),all=data||[];
+  if(EV.form)return empForm();
+  if(EV.id){const p=all.find(x=>x.id==EV.id);if(p)return empDetail(p)}
+  const list=all.filter(p=>(!EM.q||p.full_name.toLowerCase().indexOf(EM.q.toLowerCase())>-1)&&(!EM.r||p.role==EM.r));
+  return'<button data-a="enew" style="width:100%;margin-bottom:10px">+ موظف جديد</button><div class="card"><input id="eq" placeholder="بحث بالاسم" value="'+esc(EM.q)+'"><select id="er2" style="margin-top:6px"><option value="">كل الأدوار</option>'+Object.keys(ROLES).map(k=>'<option value="'+k+'"'+(k==EM.r?" selected":"")+">"+ROLES[k]+"</option>").join("")+'</select></div><div class="card"><h2>الموظفون ('+list.length+")</h2>"+list.map(p=>'<button class="sec" data-a="eopen" data-id="'+p.id+'" style="display:flex;justify-content:space-between;align-items:center;width:100%;margin-bottom:6px;text-align:right;padding:10px 12px"><span><b style="font-size:15px;color:var(--tx)">'+esc(p.full_name)+'</b><br><small style="color:var(--mu);font-weight:400">'+ROLES[p.role]+" | "+esc(bn(p.branch_id))+'</small></span><span class="tag"'+(p.active?"":' style="background:var(--rd);color:#fff"')+">"+(p.active?"نشط":"معطل")+"</span></button>").join("")+"</div>"
+}
+function empForm(){
+  return'<div class="card"><h2>موظف جديد</h2><label>الاسم</label><input id="ef"><label>اسم المستخدم (إنجليزي بدون مسافات)</label><input id="en" autocapitalize="off"><label>كلمة السر (6 أحرف على الأقل)</label><input id="ep" type="text" autocomplete="off"><label>الدور</label><select id="er">'+roleOpt("assistant")+'</select><div class="row"><div><label>الفرع</label><select id="eb">'+opt(C.b,"","بدون")+'</select></div><div><label>الوردية</label><select id="es">'+opt(C.s,"","بدون")+'</select></div></div><label>الدوام الميداني</label><select id="efo"><option value="false">غير مسموح</option><option value="true">مسموح (يسجل من أي مكان)</option></select><button data-a="addemp" style="width:100%;margin-top:12px">إضافة وتفعيل</button></div>'
+}
+function empDetail(p){
+  const sel=(f,html)=>'<select data-id="'+p.id+'" data-f="'+f+'">'+html+"</select>",gm=me.role=="gm";
+  let h='<div class="card"><h2>'+esc(p.full_name)+' <span class="tag"'+(p.active?"":' style="background:var(--rd);color:#fff"')+">"+(p.active?"نشط":"معطل")+"</span></h2><small class=\"msg\">"+ROLES[p.role]+" | "+esc(bn(p.branch_id))+"</small></div>";
+  h+='<div class="card"><h2>البيانات</h2><label>الاسم</label><input id="en2" value="'+esc(p.full_name)+'"><button class="sec" data-a="esave" data-id="'+p.id+'" style="margin-top:8px">حفظ الاسم</button><label>الدور</label>'+sel("role",roleOpt(p.role))+'<div class="row"><div><label>الفرع</label>'+sel("branch_id",opt(C.b,p.branch_id,"بدون فرع"))+"</div><div><label>الوردية</label>"+sel("shift_id",opt(C.s,p.shift_id,"بدون وردية"))+"</div></div><label>حالة الحساب</label>"+sel("active",'<option value="true"'+(p.active?" selected":"")+'>مفعل</option><option value="false"'+(p.active?"":" selected")+">معطل</option>")+(p.role!="gm"?"<label>الدوام الميداني</label>"+sel("field_ok",'<option value="true"'+(p.field_ok?" selected":"")+'>مسموح (يسجل من أي مكان)</option><option value="false"'+(p.field_ok?"":" selected")+">غير مسموح</option>"):"")+"</div>";
+  if(p.role!="gm")h+='<div class="card"><h2>الجهاز</h2><p class="msg">'+(p.device_id?"الحساب مرتبط بجهاز":"لم يُربط جهاز بعد")+"</p>"+(p.device_id?'<button class="sec" data-a="rdev" data-id="'+p.id+'">فك ارتباط الجهاز</button>':"")+"</div>";
+  if(gm)h+='<div class="card"><h2>تغيير كلمة السر</h2><label>كلمة السر الجديدة (6 أحرف على الأقل)</label><input id="np2" type="text" autocomplete="off"><button data-a="setpw" data-id="'+p.id+'" style="margin-top:8px;width:100%">تعيين كلمة السر</button></div>';
+  if(p.id!=me.id&&p.role!="gm")h+='<div class="card"><h2>حذف الموظف</h2><p class="msg">لو للموظف سجلات حضور أو طلبات، عطّل حسابه بدلاً من الحذف.</p><button class="del" data-a="empdel" data-id="'+p.id+'" style="width:100%;border:1px solid var(--rd)">حذف الموظف</button></div>';
   return h
 }
 let BE={t:null,id:null};
-function lst(a,t,f){return'<div class="card"><h2>القائمة ('+a.length+")</h2>"+(a.length?a.map(x=>'<div class="it" style="display:flex;justify-content:space-between;align-items:center;gap:6px"><div>'+f(x)+'</div><div style="display:flex;gap:4px;flex:none"><button class="sec" data-a="bedit" data-t="'+t+'" data-id="'+x.id+'">تعديل</button><button class="del" data-del="'+t+":"+x.id+'">حذف</button></div></div>').join(""):'<p class="msg">لا يوجد شيء بعد.</p>')+"</div>"}
+function lst(a,t,f){return'<div class="card"><h2>القائمة ('+a.length+")</h2>"+(a.length?a.map(x=>'<div class="it" style="display:flex;justify-content:space-between;align-items:center;gap:6px"><div>'+f(x)+'</div><div style="display:flex;gap:4px;flex:none"><button class="sec" data-a="bedit" data-k="'+t+'" data-id="'+x.id+'">تعديل</button><button class="del" data-del="'+t+":"+x.id+'">حذف</button></div></div>').join(""):'<p class="msg">لا يوجد شيء بعد.</p>')+"</div>"}
 async function vBr(){
   const e=BE.t=="branches"?(C.b.find(x=>x.id==BE.id)||{}):{};
   return'<div class="card"><h2>'+(e.id?"تعديل فرع":"إضافة فرع")+'</h2><label>اسم الفرع</label><input id="bn" value="'+esc(e.name||"")+'"><div class="row"><div><label>خط العرض</label><input id="bla" inputmode="decimal" value="'+(e.lat==null?"":e.lat)+'"></div><div><label>خط الطول</label><input id="blo" inputmode="decimal" value="'+(e.lng==null?"":e.lng)+'"></div></div><label>نطاق الحضور بالمتر</label><input id="br" inputmode="numeric" value="'+(e.radius_m||150)+'"><div class="row" style="margin-top:10px"><button class="sec" data-a="here">موقعي الحالي</button><button data-a="addbr">'+(e.id?"حفظ التعديل":"حفظ")+"</button>"+(e.id?'<button class="sec" data-a="bcancel">إلغاء</button>':"")+'</div><p class="msg">قف داخل الفرع واضغط "موقعي الحالي" لتحديد الإحداثيات بدقة.</p></div>'+lst(C.b,"branches",b=>esc(b.name)+"<small> | "+b.lat+" , "+b.lng+" | النطاق "+b.radius_m+" متر</small>")
@@ -497,23 +539,40 @@ function exportXls(){
 
 document.addEventListener("click",async ev=>{
   const t=ev.target.closest("[data-t],[data-a],[data-del]");if(!t)return;
-  if(t.dataset.t){document.body.classList.remove("mo");tab=t.dataset.t;H.detail=null;O.id=null;O.form=null;RQ.id=null;RQ.form=null;PY.id=null;BE.id=null;BE.t=null;return render()}
+  if(t.dataset.t){document.body.classList.remove("mo");tab=t.dataset.t;H.detail=null;O.id=null;O.form=null;RQ.id=null;RQ.form=null;PY.id=null;BE.id=null;BE.t=null;EV.id=null;EV.form=false;return render()}
   if(t.dataset.del){const [tb,id]=t.dataset.del.split(":");const {error}=await sb.from(tb).delete().eq("id",id);if(error)return toast(error.message.indexOf("foreign")>-1?"لا يمكن الحذف لأنه مستخدم عند موظفين":error.message);await loadRef();return render()}
   const a=t.dataset.a;
   if(a=="login"){let u=val("lu");if(u.indexOf("@")<0)u=u.toLowerCase()+"@drahem.app";const {error}=await sb.auth.signInWithPassword({email:u,password:$("lp").value});if(error)toast("خطأ في الدخول: "+error.message);else boot().catch(x=>toast("خطأ: "+x.message))}
-  else if(a=="logout"){if(ch){sb.removeChannel(ch);ch=null}unread=0;stopTrack();killMap();await sb.auth.signOut();me=null;render()}
+  else if(a=="logout"){NAV={stack:[],cur:null,skip:false};if(ch){sb.removeChannel(ch);ch=null}unread=0;stopTrack();killMap();await sb.auth.signOut();me=null;render()}
   else if(a=="in"||a=="out")punch(a);
   else if(a=="rep")runRep();
   else if(a=="xls")exportXls();
   else if(a=="prt")window.print();
   else if(a=="beep")beep();
+  else if(a=="back"){if(NAV.stack.length)history.back()}
+  else if(a=="enew"){EV.form=true;EV.id=null;render()}
+  else if(a=="eopen"){EV.id=t.dataset.id;EV.form=false;render()}
+  else if(a=="esave"){const nn=$("en2").value.trim();if(!nn)return toast("اكتب الاسم");const {error}=await sb.from("profiles").update({full_name:nn}).eq("id",t.dataset.id);toast(error?error.message:"تم حفظ الاسم");render()}
+  else if(a=="setpw"){const pw=$("np2").value;if(pw.length<6)return toast("كلمة السر 6 أحرف على الأقل");const {error}=await sb.rpc("admin_set_password",{p_user:t.dataset.id,p_password:pw});toast(error?error.message:"تم تغيير كلمة السر");if(!error)$("np2").value=""}
+  else if(a=="empdel"){if(!confirm("حذف الموظف نهائياً؟ لا يمكن التراجع."))return;const {error}=await sb.rpc("delete_employee",{p_user:t.dataset.id});if(error)return toast(error.message);EV.id=null;toast("تم حذف الموظف");render()}
+  else if(a=="mpw"){const a1=$("mp1").value,a2=$("mp2").value;if(a1.length<6)return toast("كلمة السر 6 أحرف على الأقل");if(a1!=a2)return toast("كلمتا السر غير متطابقتين");const {error}=await sb.auth.updateUser({password:a1});toast(error?error.message:"تم تغيير كلمة السر");if(!error){$("mp1").value="";$("mp2").value=""}}
+  else if(a=="bkmake"||a=="bkxls"){$("bkmsg").textContent="جاري التجهيز...";try{$("bkmsg").textContent="تم. "+await makeBackup(a=="bkxls")}catch(e){$("bkmsg").textContent="خطأ: "+e.message}}
+  else if(a=="bkrestore"){
+    const f=$("bkfile").files[0];if(!f)return toast("اختر ملف النسخة أولاً");
+    let d;try{d=JSON.parse(await f.text())}catch(e){return toast("الملف غير صالح")}
+    if(!d.tables)return toast("ليس ملف نسخة احتياطية صالح");
+    if(!confirm("سيتم إضافة السجلات الناقصة فقط من هذه النسخة. متابعة؟"))return;
+    $("bkres").textContent="جاري الاستعادة...";
+    const {data,error}=await sb.rpc("restore_backup",{p:d.tables});
+    if(error)return $("bkres").textContent="خطأ: "+error.message;
+    $("bkres").innerHTML=Object.keys(data).map(k=>esc(k)+": "+(typeof data[k]=="number"?data[k]+" سجل مُضاف":esc(data[k]))).join("<br>")}
   else if(a=="atab"){AT.t=t.dataset.v;render()}
   else if(a=="geo"){GEO=null;if($("geo"))$("geo").innerHTML=geoHtml();refreshGeo()}
   else if(a=="aedit"||a=="amanual"){AE.d=AT.d;tab="aed";render()}
   else if(a=="arev"){const {error}=await sb.rpc("review_attendance",{p_id:+t.dataset.id,p_ok:true});toast(error?error.message:"تم الاعتماد");render()}
   else if(a=="hatt"){tab="att";AT.t="team";AT.d=H.date;render()}
   else if(a=="rdev"){const {error}=await sb.rpc("reset_device",{p_user:t.dataset.id});toast(error?error.message:"تم فك ارتباط الجهاز");render()}
-  else if(a=="bedit"){BE.t=t.dataset.t;BE.id=+t.dataset.id;render();window.scrollTo(0,0)}
+  else if(a=="bedit"){BE.t=t.dataset.k;BE.id=+t.dataset.id;render();window.scrollTo(0,0)}
   else if(a=="bcancel"){BE.id=null;BE.t=null;render()}
   else if(a=="asave"){const id=t.dataset.id,i=$("ai_"+id).value,o=$("ao_"+id).value;if(!i)return toast("اكتب وقت الحضور");const {error}=await sb.rpc("set_attendance",{p_user:id,p_date:AE.d,p_in:i,p_out:o||null});toast(error?error.message:"تم الحفظ");render()}
   else if(a=="adel"){if(!confirm("حذف سجل الحضور لهذا اليوم؟"))return;const {error}=await sb.rpc("delete_attendance",{p_user:t.dataset.id,p_date:AE.d});toast(error?error.message:"تم الحذف");render()}
@@ -574,15 +633,15 @@ document.addEventListener("click",async ev=>{
     const tmp=supabase.createClient(URL_,KEY,{auth:{persistSession:false,autoRefreshToken:false,storageKey:"tmp-signup"}});
     const {data,error}=await tmp.auth.signUp({email:un.indexOf("@")>-1?un:un+"@drahem.app",password:pw,options:{data:{full_name:nm}}});
     if(error||!data.user)return toast(error?error.message:"تعذر إنشاء الحساب");
-    const e2=await sb.from("profiles").update({role:$("er").value,branch_id:+$("eb").value||null,shift_id:+$("es").value||null,active:true}).eq("id",data.user.id);
+    const e2=await sb.from("profiles").update({role:$("er").value,branch_id:+$("eb").value||null,shift_id:+$("es").value||null,active:true,field_ok:$("efo").value=="true"}).eq("id",data.user.id);
     if(e2.error)return toast(e2.error.message);
-    toast("تمت إضافة الموظف");render()
+    EV.form=false;toast("تمت إضافة الموظف");render()
   }
 });
 document.addEventListener("change",async ev=>{
   const e=ev.target;
   if(e.id=="aed_d"||e.id=="aed_b"){AE.d=$("aed_d").value||AE.d;AE.b=$("aed_b").value;return render()}
-  if(e.id=="eq"||e.id=="er2"){EM.q=$("eq").value.trim();EM.r=$("er2").value;return render()}
+  if(e.id=="eq"||e.id=="er2"){EV.id=null;EM.q=$("eq").value.trim();EM.r=$("er2").value;return render()}
   if(e.id=="atd"||e.id=="atb"||e.id=="atf"){AT.d=$("atd").value||AT.d;AT.b=$("atb").value;AT.f=$("atf").value;return render()}
   if(e.id=="pm"){PY.m=e.value||PY.m;PY.id=null;return render()}
   if(e.id=="qs"||e.id=="qf"){RQ.q=$("qs").value.trim();RQ.f=$("qf").value;return render()}
